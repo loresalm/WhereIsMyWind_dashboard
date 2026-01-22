@@ -1,16 +1,23 @@
 <script>
   import { onMount } from 'svelte';
-  import { loadWindData, generateMockData } from './firebase.js';
+  import { loadWindData, generateMockData, getAvailableDateRange, getMockDateRange } from './firebase.js';
+  import WindRose from './WindRose.svelte';
+  import FilterControls from './FilterControls.svelte';
 
   // State variables
   let windData = [];
   let selectedDays = [0, 1, 2, 3, 4, 5, 6]; // All days selected by default
-  let startDate = '2025-06-01';
-  let endDate = '2025-09-30';
+  let startDate = '';
+  let endDate = '';
   let startHour = 1;
   let endHour = 18;
   let loading = false;
   let useMockData = false; // Set to true to use mock data
+
+  // Date range from Firebase
+  let minAvailableDate = null;
+  let maxAvailableDate = null;
+  let availableDates = [];
 
   // Map will be loaded after component mounts
   let mapLoaded = false;
@@ -31,15 +38,56 @@
   // Statistics
   $: stats = calculateStats(filteredData);
   $: windRoseData = calculateWindRose(filteredData);
+  
+  // Format selected days for display
+  $: selectedDayNames = selectedDays
+    .sort((a, b) => a - b)
+    .map(i => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][i])
+    .join(', ');
 
   function calculateStats(data) {
-    if (data.length === 0) return { avg: 0, max: 0, records: 0 };
-    
+    if (data.length === 0) return { 
+      avg: 0, 
+      max: 0, 
+      records: 0, 
+      scale: [0, 0, 0],
+      mainDirection: 'N/A',
+      mainDirectionDegrees: 0
+    };
+
     const speeds = data.map(r => r['Wind Speed (kts)'] || 0);
+    const max = Math.max(...speeds);
+
+    // Calculate main wind direction
+    const directions = data.map(r => {
+      const dirStr = r['Wind Direction'];
+      return parseInt(dirStr);
+    }).filter(d => !isNaN(d));
+
+    let mainDirectionDegrees = 0;
+    if (directions.length > 0) {
+      // Calculate average direction (circular mean)
+      const sinSum = directions.reduce((sum, deg) => sum + Math.sin(deg * Math.PI / 180), 0);
+      const cosSum = directions.reduce((sum, deg) => sum + Math.cos(deg * Math.PI / 180), 0);
+      mainDirectionDegrees = Math.round((Math.atan2(sinSum, cosSum) * 180 / Math.PI + 360) % 360);
+    }
+
+    // Convert degrees to compass direction
+    const compassDirections = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const index = Math.round(mainDirectionDegrees / 22.5) % 16;
+    const mainDirection = compassDirections[index];
+
     return {
       avg: (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(1),
-      max: Math.max(...speeds).toFixed(1),
-      records: data.length
+      max: max.toFixed(1),
+      records: data.length,
+      scale: [
+        (max * 0.33).toFixed(1),
+        (max * 0.66).toFixed(1),
+        max.toFixed(1)
+      ],
+      mainDirection,
+      mainDirectionDegrees
     };
   }
 
@@ -60,6 +108,42 @@
     return buckets.map(count => count / max);
   }
 
+  async function loadDateRange() {
+    try {
+      let dateRange;
+      
+      if (useMockData) {
+        dateRange = getMockDateRange();
+      } else {
+        dateRange = await getAvailableDateRange();
+      }
+      
+      minAvailableDate = dateRange.minDate;
+      maxAvailableDate = dateRange.maxDate;
+      availableDates = dateRange.availableDates;
+      
+      // Set initial date range if not set
+      if (!startDate && minAvailableDate) {
+        startDate = minAvailableDate;
+      }
+      if (!endDate && maxAvailableDate) {
+        endDate = maxAvailableDate;
+      }
+      
+      console.log('📅 Date range loaded:', { minAvailableDate, maxAvailableDate, count: availableDates.length });
+      
+    } catch (error) {
+      console.error('Error loading date range:', error);
+      // Set fallback dates
+      const fallbackRange = getMockDateRange();
+      minAvailableDate = fallbackRange.minDate;
+      maxAvailableDate = fallbackRange.maxDate;
+      availableDates = fallbackRange.availableDates;
+      startDate = minAvailableDate;
+      endDate = maxAvailableDate;
+    }
+  }
+
   async function loadData() {
     loading = true;
     
@@ -78,20 +162,12 @@
     }
   }
 
-  function toggleDay(day) {
-    if (selectedDays.includes(day)) {
-      selectedDays = selectedDays.filter(d => d !== day);
-    } else {
-      selectedDays = [...selectedDays, day];
-    }
-  }
-
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 
-                      'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-
-  onMount(() => {
-    loadData();
+  onMount(async () => {
+    // Load date range first
+    await loadDateRange();
+    
+    // Then load wind data
+    await loadData();
     
     // Load Leaflet CSS and JS
     const link = document.createElement('link');
@@ -142,7 +218,35 @@
     {/if}
   </header>
   
+  <!-- Compact Filter Controls Card -->
+  <div class="glass-card filter-card">
+    <FilterControls 
+      bind:selectedDays
+      bind:startDate
+      bind:endDate
+      bind:startHour
+      bind:endHour
+      bind:minAvailableDate
+      bind:maxAvailableDate
+      bind:availableDates
+    />
+  </div>
+
+  <!-- Map and Stats Card -->
   <div class="glass-card map-card">
+    <!-- Descriptive Summary -->
+    <div class="data-summary">
+      Showing wind data from <strong>{startDate}</strong> to <strong>{endDate}</strong>, 
+      between <strong>{startHour}:00</strong> and <strong>{endHour}:00</strong>
+      {#if selectedDays.length === 7}
+        on <strong>all days</strong>
+      {:else if selectedDays.length === 0}
+        with <strong>no days selected</strong>
+      {:else}
+        on <strong>{selectedDayNames}</strong>
+      {/if}
+    </div>
+
     <div class="map-container">
       <div id="map" class="map"></div>
       
@@ -150,62 +254,10 @@
         {#if loading}
           <div class="loading">Loading wind data...</div>
         {:else}
-          <svg viewBox="0 0 400 400" class="wind-rose">
-            <!-- Background circles (semi-transparent) -->
-            {#each [1, 2, 3, 4] as i}
-              <circle 
-                cx="200" 
-                cy="200" 
-                r={160 / 4 * i} 
-                fill="none" 
-                stroke="rgba(255,255,255,0.3)" 
-                stroke-width="1.5"
-              />
-            {/each}
-            
-            <!-- Wind rose petals (semi-transparent with no fill in center) -->
-            {#each windRoseData as value, i}
-              {@const angle = (i * 22.5 - 90) * Math.PI / 180}
-              {@const nextAngle = ((i + 1) * 22.5 - 90) * Math.PI / 180}
-              {@const radius = 160 * value}
-              {@const x1 = 200 + Math.cos(angle - 0.2) * radius}
-              {@const y1 = 200 + Math.sin(angle - 0.2) * radius}
-              {@const x2 = 200 + Math.cos(nextAngle + 0.2) * radius}
-              {@const y2 = 200 + Math.sin(nextAngle + 0.2) * radius}
-              {@const hue = (i * 22.5) % 360}
-              
-              <path 
-                d="M 200 200 L {x1} {y1} A {radius} {radius} 0 0 1 {x2} {y2} Z"
-                fill="hsl({hue}, 85%, 65%)"
-                opacity="0.75"
-                class="rose-petal"
-                stroke="rgba(255,255,255,0.4)"
-                stroke-width="1"
-              />
-            {/each}
-            
-            <!-- Direction labels with semi-transparent background -->
-            {#each directions as dir, i}
-              {@const angle = (i * 22.5 - 90) * Math.PI / 180}
-              {@const x = 200 + Math.cos(angle) * 190}
-              {@const y = 200 + Math.sin(angle) * 190}
-              
-              <circle cx={x} cy={y} r="16" fill="rgba(0,0,0,0.0)" stroke="rgba(255,255,255,0.0)" stroke-width="1"/>
-              <text 
-                x={x} 
-                y={y}
-                text-anchor="middle" 
-                dominant-baseline="middle" 
-                class="compass-text" 
-              >
-                {dir}
-              </text>
-            {/each}
-            
-            <!-- Center point (semi-transparent) -->
-            <circle cx="200" cy="200" r="10" fill="rgba(0,0,0,0.5)" stroke="rgba(255,255,255,0.6)" stroke-width="2"/>
-            <circle cx="200" cy="200" r="4" fill="rgba(255,255,255,0.8)"/>
-          </svg>
+          <WindRose
+            data={windRoseData}
+            scaleLabels={stats.scale}
+          />
         {/if}
       </div>
     </div>
@@ -213,49 +265,19 @@
     <div class="stats-container">
       <div class="stat-item">
         <div class="stat-value">{stats.avg}</div>
-        <div class="stat-label">Avg Speed (kts)</div>
+        <div class="stat-label">Avg Speed</div>
       </div>
       <div class="stat-item">
         <div class="stat-value">{stats.max}</div>
-        <div class="stat-label">Max Speed (kts)</div>
+        <div class="stat-label">Max Speed</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">{stats.mainDirection}</div>
+        <div class="stat-label">Main Direction</div>
       </div>
       <div class="stat-item">
         <div class="stat-value">{stats.records}</div>
         <div class="stat-label">Data Points</div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="glass-card date-selector">
-    <div class="selector-section">
-      <div class="selector-label">Date Range</div>
-      <div class="input-group">
-        <input type="date" class="glass-input" bind:value={startDate}>
-        <input type="date" class="glass-input" bind:value={endDate}>
-      </div>
-    </div>
-    
-    <div class="selector-section">
-      <div class="selector-label">Time Range (Hours)</div>
-      <div class="input-group">
-        <input type="number" class="glass-input" bind:value={startHour} min="0" max="23" placeholder="From">
-        <input type="number" class="glass-input" bind:value={endHour} min="0" max="23" placeholder="To">
-      </div>
-    </div>
-    
-    <div class="selector-section">
-      <div class="selector-label">Days of Week</div>
-      <div class="checkbox-group">
-        {#each dayNames as day, i}
-          <label class="checkbox-label">
-            <input 
-              type="checkbox" 
-              checked={selectedDays.includes(i)}
-              on:change={() => toggleDay(i)}
-            >
-            <span>{day}</span>
-          </label>
-        {/each}
       </div>
     </div>
   </div>
@@ -314,9 +336,12 @@
     border-radius: 24px;
     border: 1px solid var(--glass-border);
     box-shadow: var(--glass-shadow);
-    padding: 2rem;
-    margin-bottom: 1.5rem;
     animation: slideUp 0.6s ease;
+  }
+
+  .filter-card {
+    padding: 1rem 1.5rem;
+    margin-bottom: 1rem;
   }
 
   .map-card {
@@ -324,11 +349,24 @@
     overflow: hidden;
   }
 
+  .data-summary {
+    padding: 1rem 1.5rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.7);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .data-summary strong {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
   .map-container {
     position: relative;
     width: 100%;
     height: 600px;
-    border-radius: 24px;
     overflow: hidden;
   }
 
@@ -349,36 +387,11 @@
     z-index: 1000;
   }
 
-  .wind-rose {
-    width: 100%;
-    height: 100%;
-    filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.6));
-  }
-
-  .rose-petal {
-    transition: all 0.3s ease;
-    cursor: pointer;
-    pointer-events: all;
-  }
-
-  .rose-petal:hover {
-    opacity: 0.95 !important;
-    filter: brightness(1.3);
-    stroke-width: 2;
-  }
-
-  .compass-text {
-    font-size: 13px;
-    font-weight: 600;
-    fill: var(--text-primary);
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-  }
-
   .stats-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
-    padding: 2rem;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 
@@ -387,84 +400,17 @@
   }
 
   .stat-value {
-    font-size: 1.5rem;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+    color: var(--text-primary);
   }
 
   .stat-label {
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .date-selector {
-    display: grid;
-    gap: 1.5rem;
-  }
-
-  .selector-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .selector-label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-secondary);
-  }
-
-  .input-group {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 1rem;
-  }
-
-  .glass-input {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 0.75rem 1rem;
-    color: var(--text-primary);
-    font-family: 'Outfit', sans-serif;
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
-    outline: none;
-  }
-
-  .glass-input:focus {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.3);
-    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05);
-  }
-
-  .checkbox-group {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-    gap: 0.5rem;
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    font-size: 0.9rem;
-  }
-
-  .checkbox-label:hover {
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .checkbox-label input {
-    accent-color: rgba(255, 255, 255, 0.9);
   }
 
   .loading {
@@ -497,12 +443,16 @@
     }
 
     .glass-card {
-      padding: 1.5rem;
       border-radius: 20px;
     }
 
-    .map-card {
-      padding: 0;
+    .filter-card {
+      padding: 0.75rem 1rem;
+    }
+
+    .data-summary {
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
     }
 
     .map-container {
@@ -514,16 +464,17 @@
       height: 85%;
     }
 
-    .input-group {
-      grid-template-columns: 1fr;
-    }
-
-    .checkbox-group {
-      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-    }
-
     .stats-container {
-      padding: 1.5rem;
+      padding: 0.75rem 1rem;
+      gap: 0.5rem;
+    }
+
+    .stat-value {
+      font-size: 1.1rem;
+    }
+
+    .stat-label {
+      font-size: 0.65rem;
     }
   }
 

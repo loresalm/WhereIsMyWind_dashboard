@@ -1,5 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap');
 
+
+@media (max-width: 600px) {
+  body {
+    background-size: 36px 36px;
+  }
+}
 :root {
   --glass-bg: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.18);
@@ -17,12 +23,47 @@
 
 body {
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #0a1929;
   color: var(--text-primary);
-  overflow-x: hidden;
-  position: relative;
   min-height: 100vh;
+  overflow-x: hidden;
+
+  /* Base color */
+  background-color: #b5b5bc;
+
+  /* Procedural cross grid */
+  background-image:
+    linear-gradient(
+      to right,
+      rgba(195, 201, 213, 0.791) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(195, 201, 213, 0.791) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to right,
+      transparent calc(50% - 0.5px),
+      rgba(195, 201, 213, 0.791) calc(50%),
+      transparent calc(50% + 0.5px)
+    ),
+    linear-gradient(
+      to bottom,
+      transparent calc(50% - 0.5px),
+      rgba(195, 201, 213, 0.791) calc(50%),
+      transparent calc(50% + 0.5px)
+    );
+
+  background-size:
+    48px 48px,
+    48px 48px,
+    48px 48px,
+    48px 48px;
+
+  background-position: center;
 }
+
 
 #app {
   position: relative;

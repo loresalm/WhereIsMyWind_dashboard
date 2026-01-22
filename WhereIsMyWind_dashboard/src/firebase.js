@@ -11,6 +11,56 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 /**
+ * Get the available date range from Firestore
+ * @returns {Promise<{minDate: string, maxDate: string, availableDates: string[]}>}
+ */
+export async function getAvailableDateRange() {
+  try {
+    console.log('🔄 Fetching available date range from Firestore...');
+    
+    const windDataCollection = collection(db, 'wind_data');
+    const querySnapshot = await getDocs(windDataCollection);
+    
+    const dates = [];
+    querySnapshot.forEach((doc) => {
+      const docId = doc.id;
+      const dateData = doc.data();
+      
+      // Use the document ID as the date (format: YYYY-MM-DD)
+      // or fall back to the date field in the data
+      const dateStr = dateData.date || docId;
+      
+      // Validate it's a proper date format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        dates.push(dateStr);
+      }
+    });
+    
+    if (dates.length === 0) {
+      console.warn('⚠️ No valid dates found in Firestore');
+      return { minDate: null, maxDate: null, availableDates: [] };
+    }
+    
+    // Sort dates to find min and max
+    dates.sort();
+    const minDate = dates[0];
+    const maxDate = dates[dates.length - 1];
+    
+    console.log(`✅ Available date range: ${minDate} to ${maxDate} (${dates.length} dates)`);
+    
+    return {
+      minDate,
+      maxDate,
+      availableDates: dates
+    };
+    
+  } catch (error) {
+    console.error('❌ Error fetching date range:', error);
+    throw error;
+  }
+}
+
+/**
  * Load all wind data from Firestore
  * @returns {Promise<Array>} Array of wind data records
  */
@@ -88,6 +138,36 @@ export function generateMockData() {
   
   console.log(`📊 Generated ${data.length} mock data records`);
   return data;
+}
+
+/**
+ * Get mock date range for development/testing
+ * @returns {Object} Mock date range
+ */
+export function getMockDateRange() {
+  return {
+    minDate: '2025-05-10',
+    maxDate: '2026-01-20',
+    availableDates: generateMockAvailableDates('2025-05-10', '2026-01-20')
+  };
+}
+
+/**
+ * Generate array of dates between start and end
+ * @param {string} start - Start date YYYY-MM-DD
+ * @param {string} end - End date YYYY-MM-DD
+ * @returns {string[]} Array of date strings
+ */
+function generateMockAvailableDates(start, end) {
+  const dates = [];
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    dates.push(d.toISOString().split('T')[0]);
+  }
+  
+  return dates;
 }
 
 export { db };
