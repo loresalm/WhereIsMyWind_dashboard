@@ -434,7 +434,7 @@
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.7);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.2);
+    background:rgba(255, 255, 255, 0.08);
   }
 
   .data-summary strong {
