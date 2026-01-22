@@ -22,6 +22,9 @@
   // Map will be loaded after component mounts
   let mapLoaded = false;
 
+  // Visualization mode toggle
+  let visualizationMode = 'aggregate'; // 'aggregate' or 'hourly'
+
   // Computed filtered data
   $: filteredData = windData.filter(record => {
     const recordDate = new Date(record.date);
@@ -38,6 +41,7 @@
   // Statistics
   $: stats = calculateStats(filteredData);
   $: windRoseData = calculateWindRose(filteredData);
+  $: hourlyWindData = calculateHourlyWindRose(filteredData);
   
   // Format selected days for display
   $: selectedDayNames = selectedDays
@@ -106,6 +110,61 @@
     
     const max = Math.max(...buckets, 1);
     return buckets.map(count => count / max);
+  }
+
+  function calculateHourlyWindRose(data) {
+    const directions = 16;
+    const hourlyData = [];
+    
+    // Group data by hour
+    for (let hour = startHour; hour <= endHour; hour++) {
+      const hourData = data.filter(record => {
+        const recordHour = parseInt(record.Time?.split(':')[0] || 0);
+        return recordHour === hour;
+      });
+      
+      if (hourData.length === 0) {
+        hourlyData.push({
+          hour,
+          buckets: new Array(directions).fill(0),
+          avgSpeed: 0,
+          maxSpeed: 0,
+          count: 0
+        });
+        continue;
+      }
+      
+      // Calculate direction distribution
+      const buckets = new Array(directions).fill(0);
+      let totalSpeed = 0;
+      let maxSpeed = 0;
+      
+      hourData.forEach(record => {
+        const dirStr = record['Wind Direction'];
+        const dir = parseInt(dirStr);
+        const speed = parseFloat(record['Wind Speed (kts)']) || 0;
+        
+        if (!isNaN(dir)) {
+          const bucket = Math.floor(((dir + 11.25) % 360) / 22.5);
+          buckets[bucket]++;
+        }
+        
+        totalSpeed += speed;
+        maxSpeed = Math.max(maxSpeed, speed);
+      });
+      
+      const max = Math.max(...buckets, 1);
+      
+      hourlyData.push({
+        hour,
+        buckets: buckets.map(count => count / max),
+        avgSpeed: (totalSpeed / hourData.length).toFixed(1),
+        maxSpeed: maxSpeed.toFixed(1),
+        count: hourData.length
+      });
+    }
+    
+    return hourlyData;
   }
 
   async function loadDateRange() {
@@ -250,12 +309,32 @@
     <div class="map-container">
       <div id="map" class="map"></div>
       
+      <!-- Visualization Mode Toggle -->
+      <div class="viz-toggle">
+        <button 
+          class="toggle-btn"
+          class:active={visualizationMode === 'aggregate'}
+          on:click={() => visualizationMode = 'aggregate'}
+        >
+          Average
+        </button>
+        <button 
+          class="toggle-btn"
+          class:active={visualizationMode === 'hourly'}
+          on:click={() => visualizationMode = 'hourly'}
+        >
+          Hourly
+        </button>
+      </div>
+      
       <div class="wind-rose-overlay">
         {#if loading}
           <div class="loading">Loading wind data...</div>
         {:else}
           <WindRose
             data={windRoseData}
+            hourlyData={hourlyWindData}
+            mode={visualizationMode}
             scaleLabels={stats.scale}
           />
         {/if}
@@ -374,6 +453,45 @@
     width: 100%;
     height: 100%;
     background: #0a1929;
+  }
+
+  .viz-toggle {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1001;
+    display: flex;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 0.25rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .toggle-btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .toggle-btn:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .toggle-btn.active {
+    background: rgba(255, 255, 255, 0.9);
+    color: #000;
   }
 
   .wind-rose-overlay {
