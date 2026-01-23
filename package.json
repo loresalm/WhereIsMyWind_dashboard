@@ -1,0 +1,15 @@
+{
+  "name": "wind-data-tools",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Download and upload wind and sailing tour data with Firestore",
+  "scripts": {
+    "download-wind": "node downloadWindData.js",
+    "upload-sailing": "node uploadSailingToursToFirestore.js"
+  },
+  "dependencies": {
+    "firebase": "^10.7.1",
+    "csv-parse": "^5.5.2",
+    "csv-stringify": "^6.4.4"
+  }
+}

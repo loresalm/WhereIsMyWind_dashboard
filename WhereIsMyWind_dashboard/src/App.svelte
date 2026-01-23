@@ -1,32 +1,58 @@
 <script>
   import { onMount } from 'svelte';
-  import { loadWindData, generateMockData, getAvailableDateRange, getMockDateRange } from './firebase.js';
+  import { 
+    loadWindData, 
+    generateMockData, 
+    getAvailableDateRange, 
+    getMockDateRange,
+    loadSailingTours,
+    getSailingTourDates,
+    generateMockSailingTours,
+    getMockSailingDateRange
+  } from './firebase.js';
   import WindRose from './WindRose.svelte';
   import FilterControls from './FilterControls.svelte';
+  import SailingTourSelector from './SailingTourSelector.svelte';
+  import SailingMapView from './SailingMapView.svelte';
 
-  // State variables
+  // View mode toggle
+  let viewMode = 'wind'; // 'wind' or 'sailing'
+
+  // Wind data state
   let windData = [];
-  let selectedDays = [0, 1, 2, 3, 4, 5, 6]; // All days selected by default
+  let selectedDays = [0, 1, 2, 3, 4, 5, 6];
   let startDate = '';
   let endDate = '';
   let startHour = 1;
   let endHour = 18;
-  let loading = false;
-  let useMockData = false; // Set to true to use mock data
-
-  // Date range from Firebase
   let minAvailableDate = null;
   let maxAvailableDate = null;
   let availableDates = [];
 
-  // Map will be loaded after component mounts
-  let mapLoaded = false;
+  // Sailing tour state
+  let sailingTours = [];
+  let sailingDateGroups = [];
+  let selectedTourIds = [];
+  let sailingMapView = null;
 
-  // Visualization mode toggle
-  let visualizationMode = 'aggregate'; // 'aggregate' or 'hourly'
+  let windMap = null;
+  let sailingMap = null;
+  let windMapLoaded = false;
+  let sailingMapLoaded = false;
 
-  // Computed filtered data
-  $: filteredData = windData.filter(record => {
+  // Shared state
+  let loading = false;
+  let useMockData = false;
+
+  // Visualization mode for wind
+  let visualizationMode = 'aggregate';
+
+  // Wannsee center coordinates
+  const wannseeCenter = [52.442616, 13.164234];
+  const defaultZoom = 14;
+
+  // Computed filtered wind data
+  $: filteredWindData = windData.filter(record => {
     const recordDate = new Date(record.date);
     const recordDay = recordDate.getDay();
     const recordHour = parseInt(record.Time?.split(':')[0] || 0);
@@ -38,16 +64,64 @@
            recordHour <= endHour;
   });
 
-  // Statistics
-  $: stats = calculateStats(filteredData);
-  $: windRoseData = calculateWindRose(filteredData);
-  $: hourlyWindData = calculateHourlyWindRose(filteredData);
+  // Computed selected sailing tours
+  $: selectedSailingTours = sailingTours.filter(tour => 
+    selectedTourIds.includes(tour.id)
+  );
+
+  // Update map view when tours change
+  $: if (sailingMap && viewMode === 'sailing') {
+  updateSailingMapView();
+}
+
+  // Wind statistics
+  $: stats = calculateStats(filteredWindData);
+  $: windRoseData = calculateWindRose(filteredWindData);
+  $: hourlyWindData = calculateHourlyWindRose(filteredWindData);
   
-  // Format selected days for display
   $: selectedDayNames = selectedDays
     .sort((a, b) => a - b)
     .map(i => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][i])
     .join(', ');
+
+
+  function initWindMap() {
+  if (windMap) return;
+
+  windMap = window.L.map('wind-map', {
+    zoomControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    touchZoom: false,
+    boxZoom: false,
+    keyboard: false
+  }).setView(wannseeCenter, defaultZoom);
+
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19
+  }).addTo(windMap);
+
+  windMapLoaded = true;
+  console.log('💨 Wind map initialized (static)');
+}
+
+
+function initSailingMap() {
+  if (sailingMap) return;
+
+  sailingMap = window.L.map('sailing-map').setView(wannseeCenter, defaultZoom);
+
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19
+  }).addTo(sailingMap);
+
+  sailingMapLoaded = true;
+  console.log('⛵ Sailing map initialized');
+}
+
 
   function calculateStats(data) {
     if (data.length === 0) return { 
@@ -62,7 +136,6 @@
     const speeds = data.map(r => r['Wind Speed (kts)'] || 0);
     const max = Math.max(...speeds);
 
-    // Calculate main wind direction
     const directions = data.map(r => {
       const dirStr = r['Wind Direction'];
       return parseInt(dirStr);
@@ -70,13 +143,11 @@
 
     let mainDirectionDegrees = 0;
     if (directions.length > 0) {
-      // Calculate average direction (circular mean)
       const sinSum = directions.reduce((sum, deg) => sum + Math.sin(deg * Math.PI / 180), 0);
       const cosSum = directions.reduce((sum, deg) => sum + Math.cos(deg * Math.PI / 180), 0);
       mainDirectionDegrees = Math.round((Math.atan2(sinSum, cosSum) * 180 / Math.PI + 360) % 360);
     }
 
-    // Convert degrees to compass direction
     const compassDirections = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
     const index = Math.round(mainDirectionDegrees / 22.5) % 16;
     const mainDirection = compassDirections[index];
@@ -116,7 +187,6 @@
     const directions = 16;
     const hourlyData = [];
     
-    // Group data by hour
     for (let hour = startHour; hour <= endHour; hour++) {
       const hourData = data.filter(record => {
         const recordHour = parseInt(record.Time?.split(':')[0] || 0);
@@ -134,7 +204,6 @@
         continue;
       }
       
-      // Calculate direction distribution
       const buckets = new Array(directions).fill(0);
       let totalSpeed = 0;
       let maxSpeed = 0;
@@ -167,7 +236,7 @@
     return hourlyData;
   }
 
-  async function loadDateRange() {
+  async function loadWindDateRange() {
     try {
       let dateRange;
       
@@ -181,7 +250,6 @@
       maxAvailableDate = dateRange.maxDate;
       availableDates = dateRange.availableDates;
       
-      // Set initial date range if not set
       if (!startDate && minAvailableDate) {
         startDate = minAvailableDate;
       }
@@ -189,11 +257,10 @@
         endDate = maxAvailableDate;
       }
       
-      console.log('📅 Date range loaded:', { minAvailableDate, maxAvailableDate, count: availableDates.length });
+      console.log('📅 Wind date range loaded:', { minAvailableDate, maxAvailableDate, count: availableDates.length });
       
     } catch (error) {
-      console.error('Error loading date range:', error);
-      // Set fallback dates
+      console.error('Error loading wind date range:', error);
       const fallbackRange = getMockDateRange();
       minAvailableDate = fallbackRange.minDate;
       maxAvailableDate = fallbackRange.maxDate;
@@ -203,7 +270,7 @@
     }
   }
 
-  async function loadData() {
+  async function loadWindDataAsync() {
     loading = true;
     
     try {
@@ -213,153 +280,285 @@
         windData = await loadWindData();
       }
     } catch (error) {
-      console.error('Error loading data:', error);
-      console.log('Falling back to mock data');
+      console.error('Error loading wind data:', error);
+      console.log('Falling back to mock wind data');
       windData = generateMockData();
     } finally {
       loading = false;
     }
   }
 
-  onMount(async () => {
-    // Load date range first
-    await loadDateRange();
+  async function loadSailingToursAsync() {
+    loading = true;
     
-    // Then load wind data
-    await loadData();
-    
-    // Load Leaflet CSS and JS
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.onload = () => {
-      initMap();
-    };
-    document.head.appendChild(script);
-  });
-
-  function initMap() {
-    // Wannsee coordinates
-    const wannseeCenter = [52.442616, 13.164234]; // Latitude, Longitude
-
-    const map = window.L.map('map', {
-      zoomControl: false,
-      attributionControl: true,
-      dragging: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      touchZoom: false,
-      boxZoom: false,
-      keyboard: false
-    }).setView(wannseeCenter, 14);
-
-    // Use OpenStreetMap tiles with black & white style
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap',
-      maxZoom: 19,
-      className: 'map-tiles'
-    }).addTo(map);
-
-    mapLoaded = true;
+    try {
+      if (useMockData) {
+        sailingTours = generateMockSailingTours();
+        const dateRange = getMockSailingDateRange();
+        sailingDateGroups = dateRange.dateGroups;
+      } else {
+        sailingTours = await loadSailingTours();
+        const dateRange = await getSailingTourDates();
+        sailingDateGroups = dateRange.dateGroups;
+      }
+      
+      console.log('⛵ Loaded sailing tours:', sailingTours.length);
+      console.log('📅 Sailing date groups:', sailingDateGroups.length);
+      
+      // Auto-select the first tour so users see something immediately
+      if (sailingTours.length > 0 && selectedTourIds.length === 0) {
+        selectedTourIds = [sailingTours[0].id];
+        console.log('🎯 Auto-selected first tour:', sailingTours[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading sailing tours:', error);
+      console.log('Falling back to mock sailing data');
+      sailingTours = generateMockSailingTours();
+      const dateRange = getMockSailingDateRange();
+      sailingDateGroups = dateRange.dateGroups;
+      
+      // Auto-select first mock tour
+      if (sailingTours.length > 0 && selectedTourIds.length === 0) {
+        selectedTourIds = [sailingTours[0].id];
+      }
+    } finally {
+      loading = false;
+    }
   }
+
+function updateSailingMapView() {
+  if (!sailingMap) return;
+
+  // If no tours selected, keep Wannsee center view
+  if (selectedSailingTours.length === 0) {
+    sailingMap.setView(wannseeCenter, defaultZoom);
+  }
+    // Otherwise, the SailingMapView component will handle fitting bounds
+  }
+
+async function switchView(newMode) {
+  viewMode = newMode;
+
+  if (newMode === 'sailing') {
+    if (sailingTours.length === 0) {
+      await loadSailingToursAsync();
+    }
+
+    requestAnimationFrame(() => {
+      initSailingMap();
+      sailingMap?.invalidateSize();
+      updateSailingMapView();
+    });
+  }
+
+  if (newMode === 'wind') {
+    requestAnimationFrame(() => {
+      initWindMap();
+      windMap?.invalidateSize();
+    });
+  }
+}
+
+
+
+  onMount(async () => {
+  await loadWindDateRange();
+  await loadWindDataAsync();
+
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(link);
+
+  const script = document.createElement('script');
+  script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  script.onload = () => {
+    initWindMap(); // default view
+  };
+  document.head.appendChild(script);
+});
+
 </script>
 
 <div class="app-container">
   <header class="header">
     <h1>Wannsee Wind</h1>
-    <p>Wind Data Visualization • Berlin</p>
+    <p>Wind Data & Sailing Tour Visualization • Berlin</p>
     {#if useMockData}
       <p class="mock-indicator">Using mock data</p>
     {/if}
   </header>
   
-  <!-- Compact Filter Controls Card -->
-  <div class="glass-card filter-card">
-    <FilterControls 
-      bind:selectedDays
-      bind:startDate
-      bind:endDate
-      bind:startHour
-      bind:endHour
-      bind:minAvailableDate
-      bind:maxAvailableDate
-      bind:availableDates
-    />
+  <!-- View Mode Toggle -->
+  <div class="view-toggle-card glass-card">
+    <button 
+      class="view-toggle-btn"
+      class:active={viewMode === 'wind'}
+      on:click={() => switchView('wind')}
+    >
+      <span class="icon">💨</span>
+      <span>Wind Data</span>
+    </button>
+    <button 
+      class="view-toggle-btn"
+      class:active={viewMode === 'sailing'}
+      on:click={() => switchView('sailing')}
+    >
+      <span class="icon">⛵</span>
+      <span>Sailing Tours</span>
+    </button>
   </div>
 
-  <!-- Map and Stats Card -->
-  <div class="glass-card map-card">
-    <!-- Descriptive Summary -->
-    <div class="data-summary">
-      Showing wind data from <strong>{startDate}</strong> to <strong>{endDate}</strong>, 
-      between <strong>{startHour}:00</strong> and <strong>{endHour}:00</strong>
-      {#if selectedDays.length === 7}
-        on <strong>all days</strong>
-      {:else if selectedDays.length === 0}
-        with <strong>no days selected</strong>
-      {:else}
-        on <strong>{selectedDayNames}</strong>
-      {/if}
+  {#if viewMode === 'wind'}
+    <!-- Wind View -->
+    <div class="glass-card filter-card">
+      <FilterControls 
+        bind:selectedDays
+        bind:startDate
+        bind:endDate
+        bind:startHour
+        bind:endHour
+        bind:minAvailableDate
+        bind:maxAvailableDate
+        bind:availableDates
+      />
     </div>
 
-    <div class="map-container">
-      <div id="map" class="map"></div>
-      
-      <!-- Visualization Mode Toggle -->
-      <div class="viz-toggle">
-        <button 
-          class="toggle-btn"
-          class:active={visualizationMode === 'aggregate'}
-          on:click={() => visualizationMode = 'aggregate'}
-        >
-          Average
-        </button>
-        <button 
-          class="toggle-btn"
-          class:active={visualizationMode === 'hourly'}
-          on:click={() => visualizationMode = 'hourly'}
-        >
-          Hourly
-        </button>
-      </div>
-      
-      <div class="wind-rose-overlay">
-        {#if loading}
-          <div class="loading">Loading wind data...</div>
+    <div class="glass-card map-card">
+      <div class="data-summary">
+        Showing wind data from <strong>{startDate}</strong> to <strong>{endDate}</strong>, 
+        between <strong>{startHour}:00</strong> and <strong>{endHour}:00</strong>
+        {#if selectedDays.length === 7}
+          on <strong>all days</strong>
+        {:else if selectedDays.length === 0}
+          with <strong>no days selected</strong>
         {:else}
-          <WindRose
-            data={windRoseData}
-            hourlyData={hourlyWindData}
-            mode={visualizationMode}
-            scaleLabels={stats.scale}
-          />
+          on <strong>{selectedDayNames}</strong>
         {/if}
       </div>
+      {#if viewMode === 'wind'}
+      <div class="map-container">
+        <div id="wind-map" class="map"></div>
+        
+        <div class="viz-toggle">
+          <button 
+            class="toggle-btn"
+            class:active={visualizationMode === 'aggregate'}
+            on:click={() => visualizationMode = 'aggregate'}
+          >
+            Average
+          </button>
+          <button 
+            class="toggle-btn"
+            class:active={visualizationMode === 'hourly'}
+            on:click={() => visualizationMode = 'hourly'}
+          >
+            Hourly
+          </button>
+        </div>
+        
+        <div class="wind-rose-overlay">
+          {#if loading}
+            <div class="loading">Loading wind data...</div>
+          {:else}
+            <WindRose
+              data={windRoseData}
+              hourlyData={hourlyWindData}
+              mode={visualizationMode}
+              scaleLabels={stats.scale}
+            />
+          {/if}
+        </div>
+      </div>
+      {/if}
+      
+      <div class="stats-container">
+        <div class="stat-item">
+          <div class="stat-value">{stats.avg}</div>
+          <div class="stat-label">Avg Speed</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">{stats.max}</div>
+          <div class="stat-label">Max Speed</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">{stats.mainDirection}</div>
+          <div class="stat-label">Main Direction</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">{stats.records}</div>
+          <div class="stat-label">Data Points</div>
+        </div>
+      </div>
     </div>
-    
-    <div class="stats-container">
-      <div class="stat-item">
-        <div class="stat-value">{stats.avg}</div>
-        <div class="stat-label">Avg Speed</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">{stats.max}</div>
-        <div class="stat-label">Max Speed</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">{stats.mainDirection}</div>
-        <div class="stat-label">Main Direction</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">{stats.records}</div>
-        <div class="stat-label">Data Points</div>
-      </div>
+  {:else}
+    <!-- Sailing View -->
+    <div class="glass-card filter-card">
+      <SailingTourSelector 
+        bind:dateGroups={sailingDateGroups}
+        bind:selectedTours={selectedTourIds}
+      />
     </div>
-  </div>
+
+    <div class="glass-card map-card">
+      <div class="data-summary">
+        {#if selectedSailingTours.length === 0}
+          Select one or more sailing tours to visualize their paths
+        {:else if selectedSailingTours.length === 1}
+          Showing <strong>1 sailing tour</strong> with <strong>{selectedSailingTours[0].points.length} data points</strong>
+        {:else}
+          Showing <strong>{selectedSailingTours.length} sailing tours</strong> with <strong>{selectedSailingTours.reduce((sum, t) => sum + t.points.length, 0)} total data points</strong>
+        {/if}
+      </div>
+      {#if viewMode === 'sailing'}
+      <div class="map-container">
+        <div id="sailing-map" class="map"></div>
+        
+        {#if loading}
+          <div class="map-loading">
+            <div class="loading">Loading sailing tours...</div>
+          </div>
+        {/if}
+        
+        
+        {#if sailingMapLoaded}
+          <SailingMapView 
+            tours={selectedSailingTours}
+            map={sailingMap}
+          />
+        {/if}
+
+      </div>
+      {/if}
+      
+      {#if selectedSailingTours.length > 0}
+        <div class="stats-container">
+          <div class="stat-item">
+            <div class="stat-value">{selectedSailingTours.length}</div>
+            <div class="stat-label">Tours</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">{selectedSailingTours.reduce((sum, t) => sum + t.points.length, 0)}</div>
+            <div class="stat-label">Data Points</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">
+              {(selectedSailingTours.reduce((sum, t) => 
+                sum + t.points.reduce((s, p) => s + p.boat_speed, 0) / t.points.length, 0
+              ) / selectedSailingTours.length).toFixed(1)}
+            </div>
+            <div class="stat-label">Avg Speed (kts)</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">
+              {Math.max(...selectedSailingTours.flatMap(t => t.points.map(p => p.boat_speed))).toFixed(1)}
+            </div>
+            <div class="stat-label">Max Speed (kts)</div>
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -418,6 +617,47 @@
     animation: slideUp 0.6s ease;
   }
 
+  .view-toggle-card {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .view-toggle-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .view-toggle-btn .icon {
+    font-size: 1.5rem;
+  }
+
+  .view-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .view-toggle-btn.active {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: var(--text-primary);
+  }
+
   .filter-card {
     padding: 1rem 1.5rem;
     margin-bottom: 1rem;
@@ -453,6 +693,20 @@
     width: 100%;
     height: 100%;
     background: #0a1929;
+  }
+
+  .map-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    pointer-events: none;
   }
 
   .viz-toggle {
@@ -564,6 +818,20 @@
       border-radius: 20px;
     }
 
+    .view-toggle-card {
+      gap: 0.5rem;
+      padding: 0.75rem;
+    }
+
+    .view-toggle-btn {
+      padding: 0.75rem;
+      font-size: 0.8rem;
+    }
+
+    .view-toggle-btn .icon {
+      font-size: 1.25rem;
+    }
+
     .filter-card {
       padding: 0.75rem 1rem;
     }
@@ -596,7 +864,6 @@
     }
   }
 
-  /* Leaflet attribution styling */
   :global(.leaflet-control-attribution) {
     background: rgba(0, 0, 0, 0.5) !important;
     color: rgba(255, 255, 255, 0.7) !important;
