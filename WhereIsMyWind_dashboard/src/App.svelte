@@ -504,10 +504,8 @@ async function switchView(newMode) {
       <div class="data-summary">
         {#if selectedSailingTours.length === 0}
           Select one or more sailing tours to visualize their paths
-        {:else if selectedSailingTours.length === 1}
-          Showing <strong>1 sailing tour</strong> with <strong>{selectedSailingTours[0].points.length} data points</strong>
         {:else}
-          Showing <strong>{selectedSailingTours.length} sailing tours</strong> with <strong>{selectedSailingTours.reduce((sum, t) => sum + t.points.length, 0)} total data points</strong>
+          Showing <strong>{selectedSailingTours[0].points.length} data points</strong>
         {/if}
       </div>
       {#if viewMode === 'sailing'}
@@ -533,10 +531,6 @@ async function switchView(newMode) {
       
       {#if selectedSailingTours.length > 0}
         <div class="stats-container">
-          <div class="stat-item">
-            <div class="stat-value">{selectedSailingTours.length}</div>
-            <div class="stat-label">Tours</div>
-          </div>
           <div class="stat-item">
             <div class="stat-value">{selectedSailingTours.reduce((sum, t) => sum + t.points.length, 0)}</div>
             <div class="stat-label">Data Points</div>
