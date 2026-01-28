@@ -8,8 +8,10 @@
     "upload-sailing": "node uploadSailingToursToFirestore.js"
   },
   "dependencies": {
-    "firebase": "^10.7.1",
     "csv-parse": "^5.5.2",
-    "csv-stringify": "^6.4.4"
+    "csv-stringify": "^6.4.4",
+    "firebase": "^10.7.1",
+    "firebase-admin": "^13.6.0",
+    "leaflet": "^1.9.4"
   }
 }
