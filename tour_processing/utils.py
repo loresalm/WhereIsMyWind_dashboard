@@ -78,9 +78,9 @@ def compute_wind_boat_dataset(p_t, s_clean, wind_data):
         else:
             wind_boat_angle = np.nan
 
-        # --- speed ratio (0–1) ---
+        # --- speed ratio  ---
         if wind_speed > 0:
-            speed_ratio = min(max(boat_speed / wind_speed, 0), 1)
+            speed_ratio = boat_speed / wind_speed
         else:
             speed_ratio = np.nan
 

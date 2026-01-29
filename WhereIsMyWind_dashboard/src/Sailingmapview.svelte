@@ -108,7 +108,7 @@
     
     div.innerHTML = `
       <div style="
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.2);
         backdrop-filter: blur(10px);
         padding: 10px;
         border-radius: 8px;
@@ -161,7 +161,7 @@ function addWindSpeedLegend() {
       const singleColor = windSpeedToColor(minWind, minWind, maxWind);
       div.innerHTML = `
         <div style="
-          background: rgba(0, 0, 0, 0.7);
+          background: rgba(0, 0, 0, 0.2);
           backdrop-filter: blur(10px);
           padding: 10px;
           border-radius: 8px;
@@ -207,7 +207,7 @@ function addWindSpeedLegend() {
       
       div.innerHTML = `
         <div style="
-          background: rgba(0, 0, 0, 0.7);
+          background: rgba(0, 0, 0, 0.2);
           backdrop-filter: blur(10px);
           padding: 10px;
           border-radius: 8px;
@@ -508,7 +508,7 @@ gpxLayers.push(circle);
       
       div.innerHTML = `
         <div style="
-          background: rgba(0, 0, 0, 0.7);
+          background: rgba(0, 0, 0, 0.2);
           backdrop-filter: blur(10px);
           padding: 10px;
           border-radius: 8px;
@@ -522,15 +522,6 @@ gpxLayers.push(circle);
           <div style="display: flex; align-items: center; margin-bottom: 8px;">
             <div style="margin-right: 10px;">
               ${gradientSVG}
-            </div>
-          </div>
-          <div style="margin-top: 8px; font-size: 0.65rem; color: rgba(255, 255, 255, 0.8);">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-              <span>Min: ${minSpeedRatio.toFixed(3)}</span>
-              <span>Max: ${maxSpeedRatio.toFixed(3)}</span>
-            </div>
-            <div style="margin-top: 4px; text-align: center;">
-              ${filteredPoints ? filteredPoints.length : 0} points
             </div>
           </div>
         </div>
@@ -1027,5 +1018,5 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
   :global(.speed-ratio-legend) {
     background: transparent !important;
     border: none !important;
-  }
+   }
 </style>
