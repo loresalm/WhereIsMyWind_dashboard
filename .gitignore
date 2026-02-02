@@ -4,3 +4,6 @@
 node_modules/*
 node_modules/*
 tour_processing/data/*
+serviceAccountKey.json
+*.png
+wind_data_export.csv

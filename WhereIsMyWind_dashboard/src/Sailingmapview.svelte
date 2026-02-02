@@ -609,11 +609,9 @@ gpxLayers.push(circle);
     // Draw thin black wind direction arrow
     drawDirectionArrow(point, point.wind_dir, 80, 'rgba(0, 0, 0, 0.6)', 1);
     
-    // Draw thin black boat direction arrow using next point
-    const nextPoint = tour.points[idx + 1];
-    if (nextPoint) {
-        const boatDirection = bearingBetweenPoints(point, nextPoint);
-        drawDirectionArrow(point, boatDirection, 60, 'rgba(0, 0, 0, 0.6)', 1);
+    // Draw thin black boat direction arrow using boat_heading from dataset
+    if (point.boat_heading && !isNaN(point.boat_heading) && point.boat_heading !== 0) {
+        drawDirectionArrow(point, point.boat_heading, 60, 'rgba(0, 0, 0, 0.6)', 1);
     }
     });
 
@@ -642,12 +640,12 @@ gpxLayers.push(circle);
   }
 
 function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
-  const angleRad = (direction - 90) * Math.PI / 180;
+  const angleRad = direction * Math.PI / 180;
   const lat = Number(point.lat);
   const lon = Number(point.lon);
 
-  const dLat = (lengthMeters / 111111) * Math.sin(angleRad);
-  const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.cos(angleRad);
+  const dLat = (lengthMeters / 111111) * Math.cos(angleRad);
+  const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.sin(angleRad);
 
   const endLat = lat + dLat;
   const endLon = lon + dLon;
@@ -672,13 +670,13 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
 
   // Left side of arrowhead
   const leftAngle = backAngle - arrowAngle;
-  const leftDLat = (arrowLength / 111111) * Math.sin(leftAngle);
-  const leftDLon = (arrowLength / (111111 * Math.cos(endLat * Math.PI / 180))) * Math.cos(leftAngle);
-  
+  const leftDLat = (arrowLength / 111111) * Math.cos(leftAngle);
+  const leftDLon = (arrowLength / (111111 * Math.cos(endLat * Math.PI / 180))) * Math.sin(leftAngle);
+
   // Right side of arrowhead
   const rightAngle = backAngle + arrowAngle;
-  const rightDLat = (arrowLength / 111111) * Math.sin(rightAngle);
-  const rightDLon = (arrowLength / (111111 * Math.cos(endLat * Math.PI / 180))) * Math.cos(rightAngle);
+  const rightDLat = (arrowLength / 111111) * Math.cos(rightAngle);
+  const rightDLon = (arrowLength / (111111 * Math.cos(endLat * Math.PI / 180))) * Math.sin(rightAngle);
 
   const arrowHead = window.L.polyline(
     [
@@ -716,12 +714,12 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
 
   function drawWindVector(point, color) {
     const lengthMeters = 120;
-    const angleRad = (point.wind_dir - 90) * Math.PI / 180;
+    const angleRad = point.wind_dir * Math.PI / 180;
     const lat = Number(point.lat);
     const lon = Number(point.lon);
 
-    const dLat = (lengthMeters / 111111) * Math.sin(angleRad);
-    const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.cos(angleRad);
+    const dLat = (lengthMeters / 111111) * Math.cos(angleRad);
+    const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.sin(angleRad);
 
     const endLat = lat + dLat;
     const endLon = lon + dLon;
@@ -767,13 +765,19 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
   }
 
   function createHoverPoint(point, nextPoint, color) {
+    // Use boat_heading from dataset (already computed with centered difference)
     let boatDirection = point.boat_heading;
-    if (nextPoint) {
-      boatDirection = bearingBetweenPoints(point, nextPoint);
+    
+    // Handle null/NaN/0 cases
+    if (!boatDirection || isNaN(boatDirection) || boatDirection === 0) {
+      boatDirection = null;  // Will display as "N/A"
     }
 
-    let windBoatDiff = Math.abs(point.wind_dir - boatDirection);
-    if (windBoatDiff > 180) windBoatDiff = 360 - windBoatDiff;
+    let windBoatDiff = null;
+    if (boatDirection !== null && point.wind_dir) {
+      windBoatDiff = Math.abs(point.wind_dir - boatDirection);
+      if (windBoatDiff > 180) windBoatDiff = 360 - windBoatDiff;
+    }
 
     const popupContent = `
       <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
@@ -802,14 +806,14 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
               </div>
               <div>
                 <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Dir</div>
-                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Math.round(boatDirection)}°</div>
+                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${boatDirection ? Math.round(boatDirection) + '°' : 'N/A'}</div>
               </div>
             </div>
           </div>
 
           <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
             <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;">Angle Diff</div>
-            <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Math.round(windBoatDiff)}°</div>
+            <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${windBoatDiff !== null ? Math.round(windBoatDiff) + '°' : 'N/A'}</div>
           </div>
 
         </div>

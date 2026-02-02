@@ -69,16 +69,21 @@ async function uploadSailingTours(csvPath) {
         };
       }
       
+      const parseOrNull = (val) => {
+        const num = parseFloat(val);
+        return isNaN(num) ? null : num;
+      };
+
       toursByKey[tourKey].points.push({
         time: record.time,
-        lat: parseFloat(record.lat),
-        lon: parseFloat(record.lon),
-        boat_speed: parseFloat(record.boat_speed) || 0,
-        wind_speed: parseFloat(record.wind_speed) || 0,
-        boat_heading: parseFloat(record.boat_heading) || 0,
-        wind_dir: parseFloat(record.wind_dir) || 0,
-        wind_boat_angle: parseFloat(record.wind_boat_angle) || 0,
-        speed_ratio: parseFloat(record.speed_ratio) || 0
+        lat: parseOrNull(record.lat),
+        lon: parseOrNull(record.lon),
+        boat_speed: parseOrNull(record.boat_speed),
+        wind_speed: parseOrNull(record.wind_speed),
+        boat_heading: parseOrNull(record.boat_heading),  // Can be null now (edge points)
+        wind_dir: parseOrNull(record.wind_dir),
+        wind_boat_angle: parseOrNull(record.wind_boat_angle),  // Can be null now
+        speed_ratio: parseOrNull(record.speed_ratio)
       });
     });
 
