@@ -61,7 +61,7 @@ async function upload(csvPath) {
 
       speed_ratio: Number(r.speed_ratio),
 
-      date: r.time.split(' ')[0],
+      date: r.date,
       gpx_path: r.gpx_path,
       start_time: r.start_time,
       end_time: r.end_time
