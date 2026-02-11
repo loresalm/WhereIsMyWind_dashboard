@@ -255,34 +255,89 @@ function addWindSpeedLegend() {
     }
     addBoatSpeedLegend();
     addWindSpeedLegend();
+    addInfoControl();
   }
 
   // Dynamic color function based on speed ratio
-  function speedRatioToColor(ratio, minRatio, maxRatio) {
-    if (minRatio === maxRatio) return '#ffffbf'; // Return middle color if all values are the same
-    
-    // Normalize ratio between min and max
-    const normalized = (ratio - minRatio) / (maxRatio - minRatio);
-    
-    // Color gradient: blue (low) -> light blue -> yellow -> orange -> red (high)
-    if (normalized < 0.25) {
-      // Blue to light blue
-      const t = normalized / 0.25;
-      return interpolateColor('#2c7bb6', '#abd9e9', t);
-    } else if (normalized < 0.5) {
-      // Light blue to yellow
-      const t = (normalized - 0.25) / 0.25;
-      return interpolateColor('#abd9e9', '#ffffbf', t);
-    } else if (normalized < 0.75) {
-      // Yellow to orange
-      const t = (normalized - 0.5) / 0.25;
-      return interpolateColor('#ffffbf', '#fdae61', t);
-    } else {
-      // Orange to red
-      const t = (normalized - 0.75) / 0.25;
-      return interpolateColor('#fdae61', '#d7191c', t);
+ function speedRatioToColor(value, min, max) {
+  const t = (value - min) / (max - min);
+
+  const plasma = [
+    [13, 8, 135],    // dark purple
+    [84, 3, 160],
+    [139, 10, 165],
+    [185, 50, 137],
+    [219, 92, 104],
+    [244, 136, 73],
+    [254, 188, 43],
+    [240, 249, 33]   // yellow
+  ];
+
+  const index = Math.floor(t * (plasma.length - 1));
+  const color = plasma[Math.max(0, Math.min(index, plasma.length - 1))];
+
+  return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+
+  function createGrid(points, cellSizeMeters = 50) {
+  if (!points.length) return [];
+
+  const metersPerDegLat = 111111;
+
+  const lats = points.map(p => Number(p.lat));
+  const lons = points.map(p => Number(p.lon));
+
+  const minLat = Math.min(...lats);
+  const minLon = Math.min(...lons);
+
+  const cellSizeLat = cellSizeMeters / metersPerDegLat;
+  const cellSizeLon = cellSizeMeters / (
+    metersPerDegLat * Math.cos(minLat * Math.PI / 180)
+  );
+
+  const grid = new Map();
+
+  points.forEach(p => {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    const ratio = Number(p.speed_ratio);
+
+    const row = Math.floor((lat - minLat) / cellSizeLat);
+    const col = Math.floor((lon - minLon) / cellSizeLon);
+
+    const key = `${row}-${col}`;
+
+    if (!grid.has(key)) {
+      grid.set(key, { row, col, sum: 0, count: 0 });
     }
-  }
+
+    const cell = grid.get(key);
+    cell.sum += ratio;
+    cell.count += 1;
+  });
+
+  const cells = [];
+
+  grid.forEach(cell => {
+    const avg = cell.sum / cell.count;
+
+    const lat1 = minLat + cell.row * cellSizeLat;
+    const lon1 = minLon + cell.col * cellSizeLon;
+
+    const lat2 = lat1 + cellSizeLat;
+    const lon2 = lon1 + cellSizeLon;
+
+    cells.push({
+      bounds: [[lat1, lon1], [lat2, lon2]],
+      avg,
+      count: cell.count
+    });
+  });
+
+  return cells;
+}
+
   
   // Helper function to interpolate between two colors
   function interpolateColor(color1, color2, factor) {
@@ -362,78 +417,57 @@ function addWindSpeedLegend() {
 
     // Create dot markers for each point
     const markers = [];
-    filteredPoints.forEach(point => {
-      const lat = Number(point.lat);
-      const lon = Number(point.lon);
-      const speedRatio = Number(point.speed_ratio);
+const cells = createGrid(filteredPoints, 40); // 50 meter grid
 
-      try {
-        // Create circle marker with dynamic color
-        const circle = window.L.circleMarker([lat, lon], {
-          radius: 6,
-          fillColor: speedRatioToColor(speedRatio, minSpeedRatio, maxSpeedRatio),
-          color: 'rgba(255, 255, 255, 0.5)',
-          weight: 1.5,
-          opacity: 0.9,
-          fillOpacity: 0.8
-        }).addTo(map);
+cells.forEach(cell => {
+  if (cell.count < 3) return; // ignore tiny clusters (optional)
 
-// Add popup with detailed info (same style as tour view)
-circle.bindPopup(`
-  <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
-    <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-      
-      <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-        <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Speed Ratio</div>
-        <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${speedRatio.toFixed(3)}</div>
-      </div>
+  const rect = L.rectangle(cell.bounds, {
+    fillColor: speedRatioToColor(cell.avg, minSpeedRatio, maxSpeedRatio),
+    fillOpacity: 0.7,
+    color: 'rgba(255,255,255,0.2)',
+    weight: 0.5
+  }).addTo(map);
 
-      <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-        <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Wind</div>
-        <div style="display: flex; justify-content: space-between; gap: 0.8rem;">
-          <div>
-            <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Speed</div>
-            <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.wind_speed || 0).toFixed(1)} kts</div>
-          </div>
-          <div>
-            <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Angle</div>
-            <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${point.angle_bin || 'N/A'}</div>
-          </div>
+  // Updated popup with matching style
+  const popupContent = `
+    <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
+      <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+        
+        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
+          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Speed Ratio</div>
+          <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${cell.avg.toFixed(3)}</div>
         </div>
-      </div>
 
-      <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-        <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Boat Speed</div>
-        <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.boat_speed || 0).toFixed(1)} kts</div>
-      </div>
+        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
+          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;">Data Points</div>
+          <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${cell.count}</div>
+        </div>
 
+      </div>
     </div>
-  </div>
-`, {
-  closeButton: false,
-  offset: [0, -6],
-  autoPan: true,
-  autoPanPadding: [50, 50],
-  className: 'fixed-size-popup'
+  `;
+
+  rect.bindPopup(popupContent, {
+    closeButton: false,
+    offset: [0, 0],
+    autoPan: true,
+    autoPanPadding: [50, 50],
+    className: 'fixed-size-popup'
+  });
+
+  // Add hover events
+  rect.on('mouseover', function() {
+    this.openPopup();
+  });
+
+  rect.on('mouseout', function() {
+    this.closePopup();
+  });
+
+  gpxLayers.push(rect);
 });
 
-// Add mouseover/mouseout events to open popup on hover
-circle.on('mouseover', function (e) {
-  this.openPopup();
-});
-
-circle.on('mouseout', function (e) {
-  this.closePopup();
-});
-
-gpxLayers.push(circle);
-
-        gpxLayers.push(circle);
-        markers.push([lat, lon]);
-      } catch (error) {
-        // Silently fail if marker creation fails
-      }
-    });
 
     // Fit bounds to show all dots
     if (markers.length > 0) {
@@ -462,6 +496,7 @@ gpxLayers.push(circle);
 
     // Add dynamic legend for speed ratio
     addDynamicSpeedRatioLegend();
+    addInfoControl();
   }
 
   function addDynamicSpeedRatioLegend() {
@@ -929,6 +964,125 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
     });
   }
 
+function addInfoControl() {
+  if (!map) return;
+  
+  const info = window.L.control({ position: 'bottomleft' }); // CHANGED from 'topright'
+  
+  info.onAdd = function() {
+    const div = window.L.DomUtil.create('div', 'info-control');
+    
+    div.innerHTML = `
+      <button class="info-button" id="info-btn">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10 14V9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="10" cy="6.5" r="0.75" fill="currentColor"/>
+        </svg>
+      </button>
+      
+      <div class="info-popup" id="info-popup" style="display: none;">
+        <div class="info-header">
+          <h4>Performance Analysis</h4>
+          <button class="info-close" id="info-close">×</button>
+        </div>
+        
+        <div class="info-content">
+          ${mode === 'individual' ? `
+            <div class="info-section">
+              <h5>Individual Tours</h5>
+              <p>Each sailing tour is visualized with color-coded trajectory showing boat speed.</p>
+            </div>
+            
+            <div class="info-section">
+              <h5>Visualizations</h5>
+              <p><strong>Boat Speed:</strong> Blue (slow) → Red (fast)</p>
+              <p><strong>Wind Speed:</strong> Blue(light) → Red (strong)</p>
+              <p><strong>Arrows:</strong> Boat heading (direction of travel)</p>
+              <p><strong>Arrows:</strong> Wind direction & Boat direction</p>
+            </div>
+            
+            <div class="info-section">
+              <h5>Hover Points</h5>
+              <p>Hover over the path to see detailed wind and boat data at that point.</p>
+            </div>
+          ` : `
+            <div class="info-section">
+  <h5>Average Performance Map</h5>
+  <p>
+    This mode aggregates all recorded sailing points across selected sessions 
+    and visualizes performance spatially.
+  </p>
+</div>
+
+<div class="info-section">
+  <h5>Speed Ratio</h5>
+  <p><strong>Speed Ratio = Boat Speed ÷ Wind Speed</strong></p>
+  <p>
+    The wind–boat angle is calculated as the smallest angular difference 
+    between boat heading and wind direction (0°–180°).
+  </p>
+</div>
+
+<div class="info-section">
+  <h5>Filtering & Aggregation</h5>
+  <p>
+    Data is filtered by wind–boat angle using 10° bins.
+    The lake is divided into fixed 40m × 40m grid cells.
+    Each cell displays the average speed ratio of all points 
+    within that area and selected angle range.
+  </p>
+</div>
+
+<div class="info-section">
+  <h5>Color Encoding</h5>
+  <p>
+    Plasma colormap is used:
+    purple indicates lower efficiency,
+    yellow indicates higher efficiency.
+  </p>
+</div>
+
+          `}
+        </div>
+      </div>
+    `;
+    
+    return div;
+  };
+  
+  const infoControl = info.addTo(map);
+  
+  // Add event listeners after the control is added to DOM
+  setTimeout(() => {
+    const btn = document.getElementById('info-btn');
+    const popup = document.getElementById('info-popup');
+    const close = document.getElementById('info-close');
+    
+    if (btn && popup && close) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = popup.style.display !== 'none';
+        popup.style.display = isVisible ? 'none' : 'block';
+      });
+      
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popup.style.display = 'none';
+      });
+      
+      // Close when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!popup.contains(e.target) && !btn.contains(e.target)) {
+          popup.style.display = 'none';
+        }
+      });
+    }
+  }, 100);
+  
+  gpxLayers.push({ __legend: infoControl });
+}
+
   // Watch for changes in tours, mode, or angle ranges
   $: {
     const tourHash = tours.map(t => t.id).join(',');
@@ -995,11 +1149,6 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
     transform-origin: 50% 100% !important;
   }
 
-  :global(.hover-point) {
-    background: transparent !important;
-    border: none !important;
-  }
-
   :global(.hover-dot) {
     width: 6px;
     height: 6px;
@@ -1022,5 +1171,174 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
   :global(.speed-ratio-legend) {
     background: transparent !important;
     border: none !important;
-   }
+  }
+
+  /* INFO CONTROL STYLES */
+  :global(.info-control) {
+    position: relative;
+  }
+
+  :global(.info-button) {
+    width: 34px;
+    height: 34px;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 0.2s ease;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  :global(.info-button:hover) {
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: white;
+  }
+
+  :global(.info-popup) {
+    position: absolute;
+    bottom: 42px;
+    left: 0;
+    width: 320px;
+    max-height: 500px;
+    background: rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    overflow-y: auto;
+    z-index: 2000;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  :global(.info-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    position: sticky;
+    top: 0;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 1;
+  }
+
+  :global(.info-header h4) {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: white;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  :global(.info-close) {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+  }
+
+  :global(.info-close:hover) {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+
+  :global(.info-content) {
+    padding: 12px 16px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  :global(.info-section) {
+    margin-bottom: 16px;
+  }
+
+  :global(.info-section:last-child) {
+    margin-bottom: 0;
+  }
+
+  :global(.info-section h5) {
+    margin: 0 0 8px 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(100, 180, 255, 1);
+  }
+
+  :global(.info-section p) {
+    margin: 0 0 6px 0;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  :global(.info-section ul) {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+
+  :global(.info-section li) {
+    margin: 4px 0;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  :global(.info-section strong) {
+    color: white;
+    font-weight: 600;
+  }
+
+  :global(.color-indicator) {
+    display: inline-block;
+    width: 60px;
+    height: 12px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  :global(.info-popup::-webkit-scrollbar) {
+    width: 6px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-track) {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-thumb:hover) {
+    background: rgba(255, 255, 255, 0.3);
+  }
 </style>

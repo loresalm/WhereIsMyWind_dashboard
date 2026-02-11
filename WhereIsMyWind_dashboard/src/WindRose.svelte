@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import { frequencyToColor } from './lib/utils/colors.js';
+
 
   /* ===== Visual configuration ===== */
   const RING_COLOR = 'rgba(0,0,0,0.7)';
@@ -7,45 +9,41 @@
   const HISTOGRAM_COLOR = 'rgba(100,150,255,0.5)';
   const DIRECTION_LINE_COLOR = 'rgba(0,0,0,0.7)';
   const HOURLY_COLOR = 'rgba(100,150,255,0.5)';
+  
 
   /* ===== Data ===== */
   export let data = [];
   export let hourlyData = [];
   export let mode = 'aggregate';
   export let scaleLabels = [];
+  export let currentHourIndex = 0;
 
   const size = 400;
   const center = size / 2;
   const radius = 160;
 
-  let currentHourIndex = 0;
-  let animationInterval;
+
+  
+
+ 
+
+
 
   $: currentHourData =
     hourlyData[currentHourIndex] ||
     { hour: 0, buckets: new Array(16).fill(0), avgSpeed: 0 };
 
   $: displayData =
-    mode === 'hourly' ? currentHourData.buckets : data;
+    mode === 'hourly'
+      ? currentHourData.buckets
+      : data;
+  $: frequencies = displayData.map(b => b.frequency ?? 0);
+  
+  $: minFreq = Math.min(...frequencies);
+  $: maxFreq = Math.max(...frequencies);
 
-  $: if (mode === 'hourly') startAnimation();
-  else stopAnimation();
+  $: freqRange = Math.max(maxFreq - minFreq, 0.00001);
 
-  function startAnimation() {
-    if (animationInterval || !hourlyData.length) return;
-    currentHourIndex = 0;
-    animationInterval = setInterval(() => {
-      currentHourIndex = (currentHourIndex + 1) % hourlyData.length;
-    }, 800);
-  }
-
-  function stopAnimation() {
-    clearInterval(animationInterval);
-    animationInterval = null;
-    currentHourIndex = 0;
-  }
-
-  onMount(() => stopAnimation);
 </script>
 
 <svg viewBox={`0 0 ${size} ${size}`} class="wind-rose">
@@ -110,11 +108,16 @@
   {/each}
 
   <!-- Histograms + direction lines -->
-  {#each displayData as value, i}
+  {#each displayData as bucket, i}
     {@const start = (i * 22.5 - 90) * Math.PI / 180}
     {@const end = ((i + 1) * 22.5 - 90) * Math.PI / 180}
     {@const mid = (start + end) / 2}
-    {@const r = radius * value}
+    {@const r = radius * (bucket.radius ?? bucket)}
+
+
+    {@const freq = bucket.frequency ?? 0}
+    {@const normalizedFreq = (freq - minFreq) / freqRange}
+    {@const fillColor = frequencyToColor(normalizedFreq)}
 
     <path
       d={`
@@ -124,9 +127,11 @@
         ${center + Math.cos(end) * r} ${center + Math.sin(end) * r}
         Z
       `}
-      fill={mode === 'hourly' ? HOURLY_COLOR : HISTOGRAM_COLOR}
+      fill={fillColor}
+      fill-opacity="0.65"
       class="histogram-sector"
     />
+
 
     <line
       x1={center}
@@ -139,6 +144,7 @@
 
   <circle cx={center} cy={center} r="3" fill={LABEL_COLOR} />
 </svg>
+
 
 {#if mode === 'hourly'}
   <div class="hourly-controls">
@@ -162,6 +168,7 @@
   </div>
 {/if}
 
+
 <style>
   .wind-rose {
     width: 100%;
@@ -173,20 +180,27 @@
   }
 
   .hourly-controls {
-    position: absolute;
-    bottom: 0.10rem;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
-    background: rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(10px);
-    padding: 0.25rem 1.25rem;
-    border-radius: 24px;
-    min-width: 250px;
-  }
+  position: absolute;
+  bottom: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+
+  padding: 0.5rem 1.5rem;
+  border-radius: 28px;
+  min-width: 260px;
+}
+
 
   .hour-indicator {
     font-size: 0.9rem;
@@ -241,4 +255,42 @@
   .progress-dot.passed {
     background: rgba(100, 150, 255, 0.8);
   }
+  .frequency-legend {
+  position: absolute;
+  bottom: 0.8rem;
+  right: 0.8rem;
+
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+
+  color: white;
+  font-size: 0.7rem;
+  min-width: 120px;
+}
+
+.frequency-legend h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.legend-gradient {
+  display: flex;
+  flex-direction: column;
+  height: 100px;
+  width: 15px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.wind-rose {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+
 </style>

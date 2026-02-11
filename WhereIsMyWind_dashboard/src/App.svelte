@@ -7,6 +7,7 @@
     getSailingTourDates,
     loadSailingPerformancePoints
   } from './firebase.js';
+  import { frequencyToColor } from './lib/utils/colors.js';
   import WindRose from './WindRose.svelte';
   import AngleRangeSelector from './AngleRangeSelector.svelte';
   import FilterControls from './FilterControls.svelte';
@@ -83,12 +84,73 @@
   // Wind statistics
   $: stats = calculateStats(filteredWindData);
   $: windRoseData = calculateWindRose(filteredWindData);
+  $: maxFrequency = Math.max(
+  ...windRoseData.map(b => b.frequency || 0),
+  0.01
+);
   $: hourlyWindData = calculateHourlyWindRose(filteredWindData);
   
   $: selectedDayNames = selectedDays
     .sort((a, b) => a - b)
     .map(i => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][i])
     .join(', ');
+
+    let currentHourIndex = 0;
+    let animationInterval;
+
+    $: if (visualizationMode === 'hourly') startAnimation();
+    $: if (visualizationMode !== 'hourly') stopAnimation();
+
+    function startAnimation() {
+      if (animationInterval || !hourlyWindData?.length) return;
+
+      currentHourIndex = 0;
+
+      animationInterval = setInterval(() => {
+        currentHourIndex =
+          (currentHourIndex + 1) % hourlyWindData.length;
+      }, 800);
+    }
+
+    function stopAnimation() {
+      clearInterval(animationInterval);
+      animationInterval = null;
+      currentHourIndex = 0;
+    }
+
+    $: currentBuckets =
+  visualizationMode === 'hourly'
+    ? hourlyWindData[currentHourIndex]?.buckets ?? []
+    : windRoseData ?? [];
+
+$: currentFrequencies =
+  currentBuckets.map(b => b.frequency ?? 0);
+
+$: legendMin =
+  currentFrequencies.length
+    ? Math.min(...currentFrequencies)
+    : 0;
+
+$: legendMax =
+  currentFrequencies.length
+    ? Math.max(...currentFrequencies)
+    : 0;
+
+  $: currentMaxSpeed =
+  currentBuckets.length
+    ? Math.max(...currentBuckets.map(b => b.avgSpeed ?? 0))
+    : 0;
+
+  $: scaleLabels = currentMaxSpeed > 0
+  ? [
+      (currentMaxSpeed * 0.33).toFixed(1),
+      (currentMaxSpeed * 0.66).toFixed(1),
+      currentMaxSpeed.toFixed(1)
+    ]
+  : [];
+
+
+
 
   function initWindMap() {
     // Get the container element
@@ -125,7 +187,109 @@
 
     windMapLoaded = true;
     windMapInitialized = true;
+    addWindInfoControl();
   }
+
+  function addWindInfoControl() {
+  if (!windMap) return;
+
+  const info = window.L.control({ position: 'bottomleft' });
+
+  info.onAdd = function () {
+    const div = window.L.DomUtil.create('div', 'info-control');
+
+    div.innerHTML = `
+      <button class="info-button" id="wind-info-btn">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M10 14V9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="10" cy="6.5" r="0.75" fill="currentColor"/>
+        </svg>
+      </button>
+
+      <div class="info-popup" id="wind-info-popup" style="display:none;">
+        <div class="info-header">
+          <h4>Wind Analysis</h4>
+          <button class="info-close" id="wind-info-close">×</button>
+        </div>
+
+        <div class="info-content">
+
+  <div class="info-section">
+    <h5>Wind Rose</h5>
+    <p>The wind rose shows wind distribution across 16 direction sectors (22.5° each).</p>
+
+    <p><strong>Sector length:</strong> Average wind speed (knots) for that direction.</p>
+    <p><strong>Sector color:</strong> Relative frequency of wind coming from that direction.</p>
+  </div>
+
+  <div class="info-section">
+    <h5>Color Scale</h5>
+    <p>The color scale is dynamically normalized.</p>
+    <p>This means the legend always reflects the currently displayed data (aggregate or hourly).</p>
+  </div>
+
+  ${
+    visualizationMode === 'aggregate'
+      ? `
+      <div class="info-section">
+        <h5>Average Mode</h5>
+        <p>Shows the average wind behavior over the selected:</p>
+        <ul>
+          <li>Date range</li>
+          <li>Time range</li>
+          <li>Selected weekdays</li>
+        </ul>
+        <p>All data is aggregated into one wind rose.</p>
+      </div>
+      `
+      : `
+      <div class="info-section">
+        <h5>Hourly Mode</h5>
+        <p>Displays wind distribution hour by hour.</p>
+        <p>Each frame represents the average for a specific hour across the selected days.</p>
+
+        <p><strong>Scale:</strong> The wind speed scale and colors are recalculated for each hour.</p>
+        <p>The progress bar indicates the current hour in the animation.</p>
+      </div>
+      `
+  }
+</div>
+
+      </div>
+    `;
+
+    return div;
+  };
+
+  const infoControl = info.addTo(windMap);
+
+  setTimeout(() => {
+    const btn = document.getElementById('wind-info-btn');
+    const popup = document.getElementById('wind-info-popup');
+    const close = document.getElementById('wind-info-close');
+
+    if (btn && popup && close) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popup.style.display =
+          popup.style.display === 'none' ? 'block' : 'none';
+      });
+
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popup.style.display = 'none';
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!popup.contains(e.target) && !btn.contains(e.target)) {
+          popup.style.display = 'none';
+        }
+      });
+    }
+  }, 100);
+}
+
 
   function initSailingMap() {
     // Get the container element
@@ -230,75 +394,86 @@
     };
   }
 
-  function calculateWindRose(data) {
-    const directions = 16;
-    const buckets = new Array(directions).fill(0);
-    
-    data.forEach(record => {
-      const dirStr = record['Wind Direction'];
-      const dir = parseInt(dirStr);
-      if (!isNaN(dir)) {
-        const bucket = Math.floor(((dir + 11.25) % 360) / 22.5);
-        buckets[bucket]++;
-      }
-    });
-    
-    const max = Math.max(...buckets, 1);
-    return buckets.map(count => count / max);
-  }
+function calculateWindRose(data) {
+  const directions = 16;
+  const speedSums = new Array(directions).fill(0);
+  const counts = new Array(directions).fill(0);
 
-  function calculateHourlyWindRose(data) {
-    const directions = 16;
-    const hourlyData = [];
-    
-    for (let hour = startHour; hour <= endHour; hour++) {
-      const hourData = data.filter(record => {
-        const recordHour = parseInt(record.Time?.split(':')[0] || 0);
-        return recordHour === hour;
-      });
-      
-      if (hourData.length === 0) {
-        hourlyData.push({
-          hour,
-          buckets: new Array(directions).fill(0),
-          avgSpeed: 0,
-          maxSpeed: 0,
-          count: 0
-        });
-        continue;
-      }
-      
-      const buckets = new Array(directions).fill(0);
-      let totalSpeed = 0;
-      let maxSpeed = 0;
-      
-      hourData.forEach(record => {
-        const dirStr = record['Wind Direction'];
-        const dir = parseInt(dirStr);
-        const speed = parseFloat(record['Wind Speed (kts)']) || 0;
-        
-        if (!isNaN(dir)) {
-          const bucket = Math.floor(((dir + 11.25) % 360) / 22.5);
-          buckets[bucket]++;
-        }
-        
-        totalSpeed += speed;
-        maxSpeed = Math.max(maxSpeed, speed);
-      });
-      
-      const max = Math.max(...buckets, 1);
-      
-      hourlyData.push({
-        hour,
-        buckets: buckets.map(count => count / max),
-        avgSpeed: (totalSpeed / hourData.length).toFixed(1),
-        maxSpeed: maxSpeed.toFixed(1),
-        count: hourData.length
-      });
+  data.forEach(record => {
+    const dir = parseFloat(record['Wind Direction']);
+    const speed = parseFloat(record['Wind Speed (kts)']);
+
+    if (!isNaN(dir) && !isNaN(speed)) {
+      const bucket = Math.floor(((dir + 11.25) % 360) / 22.5);
+      speedSums[bucket] += speed;
+      counts[bucket]++;
     }
-    
-    return hourlyData;
-  }
+  });
+
+  const total = counts.reduce((a, b) => a + b, 0);
+
+  const avgSpeeds = speedSums.map((sum, i) =>
+    counts[i] > 0 ? sum / counts[i] : 0
+  );
+
+  const maxSpeed = Math.max(...avgSpeeds, 1);
+
+  return avgSpeeds.map((avg, i) => ({
+  avgSpeed: avg,                // ← ADD THIS
+  radius: avg / maxSpeed,
+  frequency: total > 0 ? counts[i] / total : 0
+}));
+
+}
+
+
+
+function calculateHourlyWindRose(data) {
+  const hourly = {};
+
+  data.forEach(record => {
+    const time = record['Time'];
+    const dir = parseFloat(record['Wind Direction']);
+    const speed = parseFloat(record['Wind Speed (kts)']);
+
+    if (!time || isNaN(dir) || isNaN(speed)) return;
+
+    const hour = parseInt(time.split(':')[0]);
+
+    if (!hourly[hour]) {
+      hourly[hour] = {
+        speedSums: new Array(16).fill(0),
+        counts: new Array(16).fill(0)
+      };
+    }
+
+    const bucket = Math.floor(((dir + 11.25) % 360) / 22.5);
+    hourly[hour].speedSums[bucket] += speed;
+    hourly[hour].counts[bucket]++;
+  });
+
+  return Object.entries(hourly).map(([hour, data]) => {
+    const total = data.counts.reduce((a, b) => a + b, 0);
+
+    const avgSpeeds = data.speedSums.map((sum, i) =>
+      data.counts[i] > 0 ? sum / data.counts[i] : 0
+    );
+
+    const maxSpeed = Math.max(...avgSpeeds, 1);
+
+    return {
+      hour,
+      buckets: avgSpeeds.map((avg, i) => ({
+  avgSpeed: avg,                // ← ADD THIS
+  radius: avg / maxSpeed,
+  frequency: total > 0 ? data.counts[i] / total : 0
+}))
+
+    };
+  });
+}
+
+
 
   async function loadWindDateRange() {
     try {
@@ -525,6 +700,31 @@
       
       <div class="map-container">
         <div id="wind-map" class="map"></div>
+
+          <!-- Wind Frequency Legend (Map anchored) -->
+{#if viewMode === 'wind'}
+  <div class="wind-frequency-legend">
+    <h4>Direction Frequency</h4>
+
+    <div class="legend-horizontal">
+  <span>{(legendMin * 100).toFixed(0)}%</span>
+
+  <div class="legend-gradient-horizontal">
+    {#each Array(50) as _, i}
+      {@const normalized = i / 49}
+      <div
+        class="legend-strip-horizontal"
+        style="background: {frequencyToColor(normalized)}"
+      />
+    {/each}
+  </div>
+
+  <span>{(legendMax * 100).toFixed(0)}%</span>
+</div>
+
+  </div>
+{/if}
+
         
         <div class="viz-toggle">
           <button 
@@ -553,7 +753,10 @@
               data={windRoseData}
               hourlyData={hourlyWindData}
               mode={visualizationMode}
-              scaleLabels={stats.scale}
+              currentHourIndex={currentHourIndex}
+              scaleLabels={scaleLabels}
+              legendMin={legendMin}
+              legendMax={legendMax}
             />
           {/if}
         </div>
@@ -681,6 +884,7 @@
     </div>
   {/if}
 </div>
+
 
 <style>
   :root {
@@ -997,4 +1201,235 @@
   :global(.leaflet-control-attribution a) {
     color: rgba(255, 255, 255, 0.9) !important;
   }
+
+    /* INFO CONTROL STYLES */
+  :global(.info-control) {
+    position: relative;
+  }
+
+  :global(.info-button) {
+    width: 34px;
+    height: 34px;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 0.2s ease;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  :global(.info-button:hover) {
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: white;
+  }
+
+  :global(.info-popup) {
+    position: absolute;
+    bottom: 42px;
+    left: 0;
+    width: 320px;
+    max-height: 500px;
+    background: rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    overflow-y: auto;
+    z-index: 2000;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  :global(.info-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    position: sticky;
+    top: 0;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 1;
+  }
+
+  :global(.info-header h4) {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: white;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  :global(.info-close) {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+  }
+
+  :global(.info-close:hover) {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+
+  :global(.info-content) {
+    padding: 12px 16px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  :global(.info-section) {
+    margin-bottom: 16px;
+  }
+
+  :global(.info-section:last-child) {
+    margin-bottom: 0;
+  }
+
+  :global(.info-section h5) {
+    margin: 0 0 8px 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(100, 180, 255, 1);
+  }
+
+  :global(.info-section p) {
+    margin: 0 0 6px 0;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  :global(.info-section ul) {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+
+  :global(.info-section li) {
+    margin: 4px 0;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  :global(.info-section strong) {
+    color: white;
+    font-weight: 600;
+  }
+
+  :global(.color-indicator) {
+    display: inline-block;
+    width: 60px;
+    height: 12px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  :global(.info-popup::-webkit-scrollbar) {
+    width: 6px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-track) {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+  }
+
+  :global(.info-popup::-webkit-scrollbar-thumb:hover) {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* WIND FREQUENCY LEGEND – MATCH SAILING STYLE */
+.wind-frequency-legend {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 1002;
+
+  background: rgba(0, 0, 0, 0.25); /* darker like sailing */
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+
+  padding: 10px;
+  min-width: 140px;
+
+  color: white;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.7rem;
+
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.wind-frequency-legend h4 {
+  margin: 0 0 10px 0;
+  font-size: 0.8rem;
+  text-align: center;
+  font-weight: 600;
+  color: white;
+}
+
+
+/* Horizontal Frequency Legend Layout */
+.legend-horizontal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: rgba(255,255,255,0.9);
+}
+
+/* Horizontal gradient bar */
+.legend-gradient-horizontal {
+  display: flex;
+  flex-direction: row;
+  width: 120px;
+  height: 14px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.legend-strip-horizontal {
+  flex: 1;
+}
+
+
 </style>
