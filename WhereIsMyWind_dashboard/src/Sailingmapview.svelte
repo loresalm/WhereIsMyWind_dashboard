@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import flagIconSvg from './lib/assets/icons/startstopflag.svg?raw';
    
   export let tours = [];
   export let map = null;
@@ -10,6 +11,8 @@
   // existing state
   let gpxLayers = [];
   let legendControl;
+
+  let cachedGrid = null;
   
   // Color palette for different tours
   const tourColors = [
@@ -23,6 +26,31 @@
   let minSpeedRatio = 0;
   let maxSpeedRatio = 1;
   let filteredPoints = []; // Store filtered points for legend access
+
+  const PERFORMANCE_AREA = [
+  [52.444684, 13.174690],
+  [52.435228, 13.176274],
+  [52.431365, 13.182847],
+  [52.422094, 13.174671],
+  [52.424609, 13.162362],
+  [52.428017, 13.166659],
+  [52.432723, 13.167921],
+  [52.435352, 13.165825],
+  [52.440849, 13.153789],
+  [52.433149, 13.137482],
+  [52.444475, 13.133108],
+  [52.450128, 13.152433],
+  [52.459069, 13.164934],
+  [52.463152, 13.180661],
+  [52.469520, 13.182553],
+  [52.466157, 13.191983],
+  [52.450469, 13.185655],
+  [52.449202, 13.178583],
+  [52.451471, 13.171045],
+  [52.450506, 13.165027],
+  [52.443587, 13.168967],
+  [52.444684, 13.174690]
+];
   
   let lastModeHash = '';
   const topMargin = 10;
@@ -46,6 +74,157 @@
   gpxLayers = [];
 }
 
+function pointInPolygon(lat, lon, polygon) {
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][1], yi = polygon[i][0];
+    const xj = polygon[j][1], yj = polygon[j][0];
+
+    const intersect =
+      ((yi > lat) !== (yj > lat)) &&
+      (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
+}
+
+function createPolygonGrid(points, polygon, cellSizeMeters = 20) {
+  const metersPerDegLat = 111111;
+
+  const lats = polygon.map(p => p[0]);
+  const lons = polygon.map(p => p[1]);
+
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+
+  const cellSizeLat = cellSizeMeters / metersPerDegLat;
+  const cellSizeLon =
+    cellSizeMeters /
+    (metersPerDegLat * Math.cos(minLat * Math.PI / 180));
+
+  const cells = [];
+
+  for (let lat = minLat; lat < maxLat; lat += cellSizeLat) {
+    for (let lon = minLon; lon < maxLon; lon += cellSizeLon) {
+      const centerLat = lat + cellSizeLat / 2;
+      const centerLon = lon + cellSizeLon / 2;
+
+      if (!pointInPolygon(centerLat, centerLon, polygon)) continue;
+
+      cells.push({
+        bounds: [
+          [lat, lon],
+          [lat + cellSizeLat, lon + cellSizeLon]
+        ],
+        center: [centerLat, centerLon]
+      });
+    }
+  }
+
+  return cells;
+}
+
+function getNearestPoints(center, points, radiusMeters = 40) {
+  const result = [];
+
+  const metersPerDegLat = 111111;
+
+  points.forEach(p => {
+    const dLat = (Number(p.lat) - center[0]) * metersPerDegLat;
+    const dLon =
+      (Number(p.lon) - center[1]) *
+      metersPerDegLat *
+      Math.cos(center[0] * Math.PI / 180);
+
+    const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+
+    if (dist <= radiusMeters) result.push(p);
+  });
+
+  return result;
+}
+
+function interpolateIDW(center, points, radius = 60, power = 2) {
+  let weightedSum = 0;
+  let weightTotal = 0;
+  let usedPoints = 0;
+
+  const radiusSq = radius * radius;
+
+  for (const p of points) {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    const value = Number(p.speed_ratio);
+
+    const dx = (center[1] - lon) * 111320 * Math.cos(center[0] * Math.PI / 180);
+    const dy = (center[0] - lat) * 110540;
+
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq > radiusSq) continue;
+
+    const dist = Math.sqrt(distSq);
+
+    // Exact point match
+    if (dist === 0) {
+      return { value, count: 1 };
+    }
+
+    const weight = 1 / Math.pow(dist, power);
+
+    weightedSum += weight * value;
+    weightTotal += weight;
+    usedPoints++;
+  }
+
+  if (usedPoints < 3 || weightTotal === 0) {
+    return { value: null, count: 0 };
+  }
+
+  return {
+    value: weightedSum / weightTotal,
+    count: usedPoints
+  };
+}
+function buildSpatialIndex(points, cellSize = 50) {
+  const index = new Map();
+  const metersPerDeg = 111111;
+
+  for (const p of points) {
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+
+    const key = `${Math.floor(lat * metersPerDeg / cellSize)}-${Math.floor(lon * metersPerDeg / cellSize)}`;
+
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(p);
+  }
+
+  return index;
+}
+
+function getNearbyIndexedPoints(center, index, cellSize = 50) {
+  const metersPerDeg = 111111;
+
+  const latKey = Math.floor(center[0] * metersPerDeg / cellSize);
+  const lonKey = Math.floor(center[1] * metersPerDeg / cellSize);
+
+  const result = [];
+
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = `${latKey + dx}-${lonKey + dy}`;
+      if (index.has(key)) result.push(...index.get(key));
+    }
+  }
+
+  return result;
+}
   // Define updateVisualization after clearLayers
   function updateVisualization() {
     // Always clear existing layers first
@@ -417,55 +596,87 @@ function addWindSpeedLegend() {
 
     // Create dot markers for each point
     const markers = [];
-const cells = createGrid(filteredPoints, 40); // 50 meter grid
+if (!cachedGrid) {
+  cachedGrid = createPolygonGrid(filteredPoints, PERFORMANCE_AREA, 20);
+}
+
+const cells = cachedGrid;
+
+const spatialIndex = buildSpatialIndex(filteredPoints);
 
 cells.forEach(cell => {
-  if (cell.count < 3) return; // ignore tiny clusters (optional)
+  const nearby = getNearbyIndexedPoints(cell.center, spatialIndex);
+const result = interpolateIDW(cell.center, nearby, 80, 2);
+
+  let fillColor = 'rgba(255,255,255,0.08)';
+  let fillOpacity = 0.15;
+
+  if (result.value !== null) {
+    fillColor = speedRatioToColor(result.value, minSpeedRatio, maxSpeedRatio);
+
+    // Optional: confidence scaling based on point density
+    fillOpacity = Math.min(0.8, 0.3 + result.count * 0.05);
+  }
 
   const rect = L.rectangle(cell.bounds, {
-    fillColor: speedRatioToColor(cell.avg, minSpeedRatio, maxSpeedRatio),
-    fillOpacity: 0.7,
-    color: 'rgba(255,255,255,0.2)',
-    weight: 0.5
+    fillColor,
+    fillOpacity,
+    color: 'rgba(255,255,255,0.25)',
+    weight: 0.6
   }).addTo(map);
 
-  // Updated popup with matching style
-  const popupContent = `
-    <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
-      <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-        
-        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Speed Ratio</div>
-          <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${cell.avg.toFixed(3)}</div>
-        </div>
+rect.on("click", () => {
+  if (result.value === null) return;
 
-        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;">Data Points</div>
-          <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${cell.count}</div>
-        </div>
+  const centerLatLng = [
+    (cell.bounds[0][0] + cell.bounds[1][0]) / 2,
+    (cell.bounds[0][1] + cell.bounds[1][1]) / 2
+  ];
 
-      </div>
-    </div>
-  `;
-
-  rect.bindPopup(popupContent, {
+  L.popup({
+    className: 'fixed-size-popup',
     closeButton: false,
-    offset: [0, 0],
+    offset: [0, -6],
     autoPan: true,
-    autoPanPadding: [50, 50],
-    className: 'fixed-size-popup'
-  });
+    autoPanPadding: [50, 50]
+  })
+    .setLatLng(centerLatLng)
+    .setContent(`
+      <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.3;">
+        <div style="background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+          <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Speed Ratio</div>
+          <div style="font-size:0.8rem; font-weight:600; color:white;">
+            ${result.value.toFixed(3)}
+          </div>
+        </div>
 
-  // Add hover events
-  rect.on('mouseover', function() {
-    this.openPopup();
-  });
-
-  rect.on('mouseout', function() {
-    this.closePopup();
-  });
+        <div style="margin-top:6px; background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+          <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Points Used</div>
+          <div style="font-size:0.8rem; font-weight:600; color:white;">
+            ${result.count}
+          </div>
+        </div>
+      </div>
+    `)
+    .openOn(map);
+});
 
   gpxLayers.push(rect);
+});
+
+filteredPoints.forEach(p => {
+  const marker = L.circleMarker(
+    [Number(p.lat), Number(p.lon)],
+    {
+      radius: 2,
+      color: 'black',
+      fillColor: 'black',
+      fillOpacity: 1,
+      weight: 0
+    }
+  ).addTo(map);
+
+  gpxLayers.push(marker);
 });
 
 
@@ -603,26 +814,21 @@ cells.forEach(cell => {
 
       gpxLayers.push(segment);
     }
-    
-    // Add start marker
-    const startPoint = tour.points[0];
-    const startMarker = createCustomMarker(
-      [startPoint.lat, startPoint.lon],
-      '🏁',
-      `Start: ${tour.start_time}`,
-      color
-    );
-    gpxLayers.push(startMarker);
-    
-    // Add end marker
-    const endPoint = tour.points[tour.points.length - 1];
-    const endMarker = createCustomMarker(
-      [endPoint.lat, endPoint.lon],
-      '🏁',
-      `End: ${tour.end_time}`,
-      color
-    );
-    gpxLayers.push(endMarker);
+// Add start marker with flag icon
+const startPoint = tour.points[0];
+const startMarker = createFlagMarker(
+  [startPoint.lat, startPoint.lon],
+  `Start: ${tour.start_time}`
+);
+gpxLayers.push(startMarker);
+
+// Add end marker with flag icon  
+const endPoint = tour.points[tour.points.length - 1];
+const endMarker = createFlagMarker(
+  [endPoint.lat, endPoint.lon],
+  `End: ${tour.end_time}`
+);
+gpxLayers.push(endMarker);
 
     // Add wind direction vectors (sampled)
     const windSpeeds = tour.points
@@ -772,32 +978,32 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
     gpxLayers.push(line);
   }
 
-  function createCustomMarker(latLon, icon, label, color) {
-    const customIcon = window.L.divIcon({
-      html: `
-        <div style="
-          background: ${color};
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          border: 2px solid white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        ">${icon}</div>
-      `,
-      className: 'custom-marker',
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
-    });
-    
-    const marker = window.L.marker(latLon, { icon: customIcon }).addTo(map);
-    marker.bindPopup(label);
-    
-    return marker;
-  }
+function createFlagMarker(latLon, label) {
+  const html = `
+    <div style="
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: black;
+    ">
+      ${flagIconSvg}
+    </div>
+  `;
+
+  const customIcon = window.L.divIcon({
+    html,
+    className: 'custom-marker',
+    iconSize: [32, 32],
+    iconAnchor: [16, 32]
+  });
+
+  const marker = window.L.marker(latLon, { icon: customIcon }).addTo(map);
+  marker.bindPopup(label);
+
+  return marker;
+}
 
   function createHoverPoint(point, nextPoint, color) {
     // Use boat_heading from dataset (already computed with centered difference)
@@ -1008,38 +1214,41 @@ function addInfoControl() {
             </div>
           ` : `
             <div class="info-section">
-  <h5>Average Performance Map</h5>
+  <h5>Performance Surface</h5>
   <p>
-    This mode aggregates all recorded sailing points across selected sessions 
-    and visualizes performance spatially.
+    The map shows estimated sailing performance for a selected range of boat headings.
+    Use the wheel above to choose the heading angle range.
   </p>
 </div>
 
 <div class="info-section">
-  <h5>Speed Ratio</h5>
-  <p><strong>Speed Ratio = Boat Speed ÷ Wind Speed</strong></p>
+  <h5>Colors</h5>
   <p>
-    The wind–boat angle is calculated as the smallest angular difference 
-    between boat heading and wind direction (0°–180°).
+    Colors represent speed ratio (boat speed/wind speed):
+    purple = lower performance, yellow = higher performance.
   </p>
 </div>
 
 <div class="info-section">
-  <h5>Filtering & Aggregation</h5>
+  <h5>How Values Are Calculated</h5>
   <p>
-    Data is filtered by wind–boat angle using 10° bins.
-    The lake is divided into fixed 40m × 40m grid cells.
-    Each cell displays the average speed ratio of all points 
-    within that area and selected angle range.
+    Each grid cell is estimated from nearby measurements.
+    Closer data points have stronger influence.
   </p>
 </div>
 
 <div class="info-section">
-  <h5>Color Encoding</h5>
+  <h5>Map Elements & Interaction</h5>
   <p>
-    Plasma colormap is used:
-    purple indicates lower efficiency,
-    yellow indicates higher efficiency.
+    Black dots = recorded data points.  
+    Hover over a cell to see its performance value.
+  </p>
+</div>
+
+<div class="info-section">
+  <h5>Interaction</h5>
+  <p>
+    Hover over cells to see performance values at that location.
   </p>
 </div>
 
@@ -1341,4 +1550,10 @@ function addInfoControl() {
   :global(.info-popup::-webkit-scrollbar-thumb:hover) {
     background: rgba(255, 255, 255, 0.3);
   }
+  .tour-flag {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
 </style>
