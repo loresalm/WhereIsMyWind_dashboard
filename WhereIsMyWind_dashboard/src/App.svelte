@@ -9,9 +9,9 @@
   } from './firebase.js';
   import WindRose from './WindRose.svelte';
   import AngleRangeSelector from './AngleRangeSelector.svelte';
-  import FilterControls from './FilterControls.svelte';
-  import SailingTourSelector from './SailingTourSelector.svelte';
-  import SailingMapView from './SailingMapView.svelte';
+  import FilterControls from './Filtercontrols.svelte';
+  import SailingTourSelector from './Sailingtourselector.svelte';
+  import SailingMapView from './Sailingmapview.svelte';
 
   import windIcon from './lib/assets/iconwind48.svg';
   import sailingIcon from './lib/assets/iconsail48.svg';
