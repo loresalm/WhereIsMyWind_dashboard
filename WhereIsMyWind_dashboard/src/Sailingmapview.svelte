@@ -804,14 +804,14 @@ filteredPoints.forEach(p => {
           [Number(p1.lat), Number(p1.lon)],
           [Number(p2.lat), Number(p2.lon)]
         ],
-        {
-          color: speedToColor(speed, minSpeed, maxSpeed),
-          weight: 4,
-          opacity: 0.9,
-          lineCap: 'round'
-        }
+            {
+        color: speedToColor(speed, minSpeed, maxSpeed),
+        weight: 2.5,
+        opacity: 0.4,
+        lineCap: 'round',
+        className: 'glass-path' // Add custom class for CSS effects
+      }
       ).addTo(map);
-
       gpxLayers.push(segment);
     }
 // Add start marker with flag icon
@@ -840,21 +840,21 @@ gpxLayers.push(endMarker);
 
     tour.points.forEach((point, idx) => {
     if (idx % WIND_SAMPLE_RATE !== 0) return;
-    if (!point.wind_speed || !point.wind_dir) return;
+  if (!point.wind_speed || !point.wind_dir) return;
 
-    const windColor = windSpeedToColor(point.wind_speed, minWind, maxWind);
-    
-    // Draw colored wind vector
-    drawWindVector(point, windColor);
-    
-    // Draw thin black wind direction arrow
-    drawDirectionArrow(point, point.wind_dir, 80, 'rgba(0, 0, 0, 0.6)', 1);
-    
-    // Draw thin black boat direction arrow using boat_heading from dataset
-    if (point.boat_heading && !isNaN(point.boat_heading) && point.boat_heading !== 0) {
-        drawDirectionArrow(point, point.boat_heading, 60, 'rgba(0, 0, 0, 0.6)', 1);
-    }
-    });
+  const windColor = windSpeedToColor(point.wind_speed, minWind, maxWind);
+  
+  // Draw thicker colored glass-like wind vector (underneath)
+  drawWindVector(point, windColor);
+  
+  // Draw thin black wind direction arrow (on top)
+  drawDirectionArrow(point, point.wind_dir, 80, 'rgba(0, 0, 0, 0.7)', 1);
+  
+  // Draw thin black boat direction arrow
+  if (point.boat_heading && !isNaN(point.boat_heading) && point.boat_heading !== 0) {
+    drawDirectionArrow(point, point.boat_heading, 60, 'rgba(0, 0, 0, 0.7)', 1);
+  }
+});
 
     // Add hover points for detailed information
     const HOVER_SAMPLE_RATE = 1;
@@ -926,7 +926,7 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
       [endLat + rightDLat, endLon + rightDLon]
     ],
     {
-      color,
+      color, // Use the same color as the line (black)
       weight,
       opacity: 0.7,
       lineCap: 'round',
@@ -953,30 +953,31 @@ function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
     }
   }
 
-  function drawWindVector(point, color) {
-    const lengthMeters = 120;
-    const angleRad = point.wind_dir * Math.PI / 180;
-    const lat = Number(point.lat);
-    const lon = Number(point.lon);
+function drawWindVector(point, color) {
+  const lengthMeters = 80; // Match the arrow length
+  const angleRad = point.wind_dir * Math.PI / 180;
+  const lat = Number(point.lat);
+  const lon = Number(point.lon);
 
-    const dLat = (lengthMeters / 111111) * Math.cos(angleRad);
-    const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.sin(angleRad);
+  const dLat = (lengthMeters / 111111) * Math.cos(angleRad);
+  const dLon = (lengthMeters / (111111 * Math.cos(lat * Math.PI / 180))) * Math.sin(angleRad);
 
-    const endLat = lat + dLat;
-    const endLon = lon + dLon;
+  const endLat = lat + dLat;
+  const endLon = lon + dLon;
 
-    const line = window.L.polyline(
-      [[lat, lon], [endLat, endLon]],
-      {
-        color,
-        weight: 2,
-        opacity: 0.8,
-        lineCap: 'round'
-      }
-    ).addTo(map);
+  // Thicker, more visible colored line showing wind speed
+  const line = window.L.polyline(
+    [[lat, lon], [endLat, endLon]],
+    {
+      color: color,
+      weight: 3, // Thicker for better visibility
+      opacity: 0.6, // Less transparent
+      lineCap: 'round'
+    }
+  ).addTo(map);
 
-    gpxLayers.push(line);
-  }
+  gpxLayers.push(line);
+}
 
 function createFlagMarker(latLon, label) {
   const html = `
@@ -1555,5 +1556,19 @@ function addInfoControl() {
   height: 28px;
   display: block;
 }
+/* Add to your <style> section */
+:global(.glass-path) {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+:global(.hover-dot) {
+  opacity: 0 !important; /* Hidden by default */
+  transition: opacity 0.2s ease;
+}
+
+:global(.hover-point:hover .hover-dot) {
+  opacity: 1 !important;
+}
+
 
 </style>

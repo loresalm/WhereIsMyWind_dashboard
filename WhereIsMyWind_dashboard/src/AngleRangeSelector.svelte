@@ -5,33 +5,33 @@
 
   // ===== COLOR CONFIGURATION =====
   const COLORS = {
-    primary: 'rgba(100, 180, 255, 1)',        // Main selection color
-    primaryLight: 'rgba(100, 180, 255, 0.3)', // Selected segment fill
-    primaryBorder: 'rgba(100, 180, 255, 0.6)', // Selected segment border
-    
-    background: 'rgba(255, 255, 255, 0.03)',   // Unselected segment fill
-    border: 'rgba(255, 255, 255, 0.1)',        // Unselected segment border
-    
-    text: 'rgba(255, 255, 255, 0.5)',          // Unselected labels
-    textSelected: 'rgba(100, 180, 255, 1)',    // Selected labels
-    
-    centerCircle: 'rgba(255, 255, 255, 0.1)',  // Center circle fill
-    centerBorder: 'rgba(255, 255, 255, 0.3)',  // Center circle border
-    
-    divider: 'rgba(255, 255, 255, 0.15)',      // Horizontal line
-    
-    zoneLine: 'rgba(100, 180, 255, 0.5)',      // Sailing zone reference lines
-  };
+  primary: 'rgba(120, 200, 255, 1)',        // Brighter blue for selection
+  primaryLight: 'rgba(120, 200, 255, 0.4)', // More visible selected fill
+  primaryBorder: 'rgba(120, 200, 255, 0.8)', // Stronger selected border
+  
+  background: 'rgba(255, 255, 255, 0.08)',   // Brighter unselected fill
+  border: 'rgba(255, 255, 255, 0.25)',       // Much more visible borders
+  
+  text: 'rgba(255, 255, 255, 1.0)',          // Brighter unselected labels
+  textSelected: 'rgba(255, 255, 255, 1.0)',    // Bright selected labels
+  
+  centerCircle: 'rgba(255, 255, 255, 0.15)', // Brighter center
+  centerBorder: 'rgba(255, 255, 255, 0.5)',  // Stronger center border
+  
+  divider: 'rgba(255, 255, 255, 0.3)',       // Much more visible divider
+  
+  zoneLine: 'rgba(0, 0, 0, 0.6)',      // Brighter zone lines
+};
 
   const STEP = 10;
   const NUM_SEGMENTS = 18; // 0-180 in 10 degree steps
   
   let canvas;
   let ctx;
-  const canvasSize = 280;
+  const canvasSize = 230;
   const centerX = canvasSize / 2;
   const centerY = canvasSize / 2;
-  const radius = 110;
+  const radius = 80;
 
   onMount(() => {
     canvas = document.getElementById('wind-angle-canvas');
@@ -75,7 +75,7 @@
         const x = centerX + Math.cos(labelAngle) * labelRadius;
         const y = centerY + Math.sin(labelAngle) * labelRadius;
         
-        ctx.font = '11px "Outfit", sans-serif';
+        ctx.font = 'bold 11px "Outfit", sans-serif';
         ctx.fillStyle = isSelected ? COLORS.textSelected : COLORS.text;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -84,83 +84,83 @@
     }
     
     // Draw center circle
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
-    ctx.fillStyle = COLORS.centerCircle;
-    ctx.fill();
-    ctx.strokeStyle = COLORS.centerBorder;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    
-    // Draw horizontal divider line
-    ctx.beginPath();
-    ctx.moveTo(centerX - radius - 5, centerY);
-    ctx.lineTo(centerX + radius + 5, centerY);
-    ctx.strokeStyle = COLORS.divider;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+ctx.beginPath();
+ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+ctx.fillStyle = COLORS.centerCircle;
+ctx.fill();
+ctx.strokeStyle = COLORS.centerBorder;
+ctx.lineWidth = 1; // Thicker center border
+ctx.stroke();
+
+// Draw horizontal divider line
+ctx.beginPath();
+ctx.moveTo(centerX - radius - 5, centerY);
+ctx.lineTo(centerX + radius + 5, centerY);
+ctx.strokeStyle = COLORS.divider;
+ctx.lineWidth = 1; // Thicker divider
+ctx.stroke();
   }
 
-  function drawZoneLines() {
-    const zones = [
-      { angle: 30, label: 'Close Hauled (start)' },
-      { angle: 45, label: 'Close Hauled (end)' },
-      { angle: 90, label: 'Beam Reach' },
-      { angle: 120, label: 'Broad Reach (start)' },
-      { angle: 160, label: 'Broad Reach (end)' },
-      { angle: 180, label: 'Running' }
-    ];
+ function drawZoneLines() {
+  const zones = [
+    { angle: 30, label: 'Close Hauled (start)' },
+    { angle: 45, label: 'Close Hauled (end)' },
+    { angle: 90, label: 'Beam Reach' },
+    { angle: 120, label: 'Broad Reach (start)' },
+    { angle: 160, label: 'Broad Reach (end)' },
+    { angle: 180, label: 'Running' }
+  ];
 
-    zones.forEach(zone => {
-      const canvasAngle = ((zone.angle - 90) * Math.PI) / 180;
-      const mirrorAngle = ((180 + (180 - zone.angle) - 90) * Math.PI) / 180;
-      
-      // Draw line on right side
+  zones.forEach(zone => {
+    const canvasAngle = ((zone.angle - 90) * Math.PI) / 180;
+    const mirrorAngle = ((180 + (180 - zone.angle) - 90) * Math.PI) / 180;
+    
+    // Draw line on right side
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(
+      centerX + Math.cos(canvasAngle) * (radius + 5),
+      centerY + Math.sin(canvasAngle) * (radius + 5)
+    );
+    ctx.strokeStyle = COLORS.zoneLine;
+    ctx.lineWidth = 1; // Thicker zone lines
+    ctx.setLineDash([5, 3]); // Slightly longer dashes
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Draw line on left side (mirror)
+    if (zone.angle !== 180) {
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
       ctx.lineTo(
-        centerX + Math.cos(canvasAngle) * (radius + 5),
-        centerY + Math.sin(canvasAngle) * (radius + 5)
+        centerX + Math.cos(mirrorAngle) * (radius + 5),
+        centerY + Math.sin(mirrorAngle) * (radius + 5)
       );
       ctx.strokeStyle = COLORS.zoneLine;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1; // Thicker zone lines
+      ctx.setLineDash([5, 3]); // Slightly longer dashes
       ctx.stroke();
       ctx.setLineDash([]);
-      
-      // Draw line on left side (mirror)
-      if (zone.angle !== 180) {
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY);
-        ctx.lineTo(
-          centerX + Math.cos(mirrorAngle) * (radius + 5),
-          centerY + Math.sin(mirrorAngle) * (radius + 5)
-        );
-        ctx.strokeStyle = COLORS.zoneLine;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    });
-  }
+    }
+  });
+}
 
   function drawSegment(startAngle, endAngle, isSelected) {
-    const innerRadius = 40;
-    
-    // Fill
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, startAngle, endAngle);
-    ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
-    ctx.closePath();
-    ctx.fillStyle = isSelected ? COLORS.primaryLight : COLORS.background;
-    ctx.fill();
-    
-    // Stroke
-    ctx.strokeStyle = isSelected ? COLORS.primaryBorder : COLORS.border;
-    ctx.lineWidth = isSelected ? 2 : 1;
-    ctx.stroke();
-  }
+  const innerRadius = 40;
+  
+  // Fill
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+  ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
+  ctx.closePath();
+  ctx.fillStyle = isSelected ? COLORS.primaryLight : COLORS.background;
+  ctx.fill();
+  
+  // Stroke
+  ctx.strokeStyle = isSelected ? COLORS.primaryBorder : COLORS.border;
+  ctx.lineWidth = isSelected ? 2.5 : 1.5; // Thicker borders
+  ctx.stroke();
+}
 
   function handleClick(e) {
     const rect = canvas.getBoundingClientRect();
