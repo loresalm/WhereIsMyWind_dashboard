@@ -289,21 +289,36 @@ function getNearbyIndexedPoints(center, index, cellSize = 50) {
   return result;
 }
   // Define updateVisualization after clearLayers
-  function updateVisualization() {
-    // Always clear existing layers first
-    clearLayers();
-    if (legendControl && map) {
-      map.removeControl(legendControl);
-      legendControl = null;
-    }
-    
-    if (mode === 'individual') {
-      renderIndividualTours();
-    } else if (mode === 'average') {
-      renderAveragePerformance();
-    }
-    addModeToggleControl();
+function updateVisualization() {
+  // Always clear existing layers first
+  clearLayers();
+  if (legendControl && map) {
+    map.removeControl(legendControl);
+    legendControl = null;
   }
+  
+  // Close any open popups when switching modes
+  if (map) {
+    map.closePopup();
+  }
+  
+  // Clear highlighted cell when switching modes
+  if (highlightedCell && map) {
+    try {
+      map.removeLayer(highlightedCell);
+    } catch (error) {
+      // Silently fail
+    }
+    highlightedCell = null;
+  }
+  
+  if (mode === 'individual') {
+    renderIndividualTours();
+  } else if (mode === 'average') {
+    renderAveragePerformance();
+  }
+  addModeToggleControl();
+}
 
 function addBoatSpeedLegend() {
   if (!tours || tours.length === 0) return;
@@ -741,29 +756,22 @@ cells.forEach(cell => {
     })
       .setLatLng(centerLatLng)
       .setContent(`
-        <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.3;">
-          <div style="background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
-            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Speed Ratio</div>
-            <div style="font-size:0.8rem; font-weight:600; color:white;">
-              ${result.value.toFixed(3)}
-            </div>
-          </div>
+  <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.3;">
+    <div style="background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+      <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Speed Ratio</div>
+      <div style="font-size:0.8rem; font-weight:600; color:white;">
+        ${result.value.toFixed(3)}
+      </div>
+    </div>
 
-          <div style="margin-top:6px; background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
-            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Points Used</div>
-            <div style="font-size:0.8rem; font-weight:600; color:white;">
-              ${result.count}
-            </div>
-          </div>
-
-          <div style="margin-top:6px; background: rgba(100, 180, 255, 0.15); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(100, 180, 255, 0.3);">
-            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Cell Location</div>
-            <div style="font-size:0.7rem; font-weight:500; color:white;">
-              ${centerLatLng[0].toFixed(5)}, ${centerLatLng[1].toFixed(5)}
-            </div>
-          </div>
-        </div>
-      `)
+    <div style="margin-top:6px; background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+      <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Points Used</div>
+      <div style="font-size:0.8rem; font-weight:600; color:white;">
+        ${result.count}
+      </div>
+    </div>
+  </div>
+`)
       .openOn(map);
 
     // Remove highlight when popup closes
