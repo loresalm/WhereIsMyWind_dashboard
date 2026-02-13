@@ -12,6 +12,8 @@
   let gpxLayers = [];
   let legendControl;
 
+  let highlightedCell = null;
+
   export let onModeChange; // Add this prop
   let modeToggleControl
 
@@ -59,13 +61,22 @@
   const topMargin = 10;
 
   // Define clearLayers first so it's available for updateVisualization
-  function clearLayers() {
+function clearLayers() {
   if (!map) return;
+  
+  // Clear highlighted cell
+  if (highlightedCell) {
+    try {
+      map.removeLayer(highlightedCell);
+    } catch (error) {
+      // Silently fail
+    }
+    highlightedCell = null;
+  }
   
   gpxLayers.forEach(l => {
     try {
       if (l.__legend) {
-        // It's a legend control
         map.removeControl(l.__legend);
       } else if (l && map.hasLayer(l)) {
         map.removeLayer(l);
@@ -678,15 +689,13 @@ const spatialIndex = buildSpatialIndex(filteredPoints);
 
 cells.forEach(cell => {
   const nearby = getNearbyIndexedPoints(cell.center, spatialIndex);
-const result = interpolateIDW(cell.center, nearby, 80, 2);
+  const result = interpolateIDW(cell.center, nearby, 80, 2);
 
   let fillColor = 'rgba(255,255,255,0.08)';
   let fillOpacity = 0.15;
 
   if (result.value !== null) {
     fillColor = speedRatioToColor(result.value, minSpeedRatio, maxSpeedRatio);
-
-    // Optional: confidence scaling based on point density
     fillOpacity = Math.min(0.8, 0.3 + result.count * 0.05);
   }
 
@@ -697,41 +706,89 @@ const result = interpolateIDW(cell.center, nearby, 80, 2);
     weight: 0.6
   }).addTo(map);
 
-rect.on("click", () => {
-  if (result.value === null) return;
+  rect.on("click", () => {
+    if (result.value === null) return;
 
-  const centerLatLng = [
-    (cell.bounds[0][0] + cell.bounds[1][0]) / 2,
-    (cell.bounds[0][1] + cell.bounds[1][1]) / 2
-  ];
+    // Remove highlight from previously clicked cell
+    if (highlightedCell) {
+      map.removeLayer(highlightedCell);
+      highlightedCell = null;
+    }
 
-  L.popup({
-    className: 'fixed-size-popup',
-    closeButton: false,
-    offset: [0, -6],
-    autoPan: true,
-    autoPanPadding: [50, 50]
-  })
-    .setLatLng(centerLatLng)
-    .setContent(`
-      <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.3;">
-        <div style="background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
-          <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Speed Ratio</div>
-          <div style="font-size:0.8rem; font-weight:600; color:white;">
-            ${result.value.toFixed(3)}
+    // Create highlight rectangle for the clicked cell
+    const highlightRect = L.rectangle(cell.bounds, {
+      fillColor: 'transparent',
+      fillOpacity: 0,
+      color: 'rgba(255, 255, 255, 0.9)',
+      weight: 3,
+      dashArray: '5, 5',
+      className: 'highlighted-cell'
+    }).addTo(map);
+
+    highlightedCell = highlightRect;
+
+    const centerLatLng = [
+      (cell.bounds[0][0] + cell.bounds[1][0]) / 2,
+      (cell.bounds[0][1] + cell.bounds[1][1]) / 2
+    ];
+
+    L.popup({
+      className: 'fixed-size-popup',
+      closeButton: false,
+      offset: [0, -6],
+      autoPan: true,
+      autoPanPadding: [50, 50]
+    })
+      .setLatLng(centerLatLng)
+      .setContent(`
+        <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.3;">
+          <div style="background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Speed Ratio</div>
+            <div style="font-size:0.8rem; font-weight:600; color:white;">
+              ${result.value.toFixed(3)}
+            </div>
+          </div>
+
+          <div style="margin-top:6px; background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Points Used</div>
+            <div style="font-size:0.8rem; font-weight:600; color:white;">
+              ${result.count}
+            </div>
+          </div>
+
+          <div style="margin-top:6px; background: rgba(100, 180, 255, 0.15); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(100, 180, 255, 0.3);">
+            <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Cell Location</div>
+            <div style="font-size:0.7rem; font-weight:500; color:white;">
+              ${centerLatLng[0].toFixed(5)}, ${centerLatLng[1].toFixed(5)}
+            </div>
           </div>
         </div>
+      `)
+      .openOn(map);
 
-        <div style="margin-top:6px; background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); padding:0.45rem 0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
-          <div style="font-size:0.55rem; color:rgba(255,255,255,0.5); text-transform:uppercase;">Points Used</div>
-          <div style="font-size:0.8rem; font-weight:600; color:white;">
-            ${result.count}
-          </div>
-        </div>
-      </div>
-    `)
-    .openOn(map);
-});
+    // Remove highlight when popup closes
+    map.on('popupclose', function() {
+      if (highlightedCell) {
+        map.removeLayer(highlightedCell);
+        highlightedCell = null;
+      }
+    });
+  });
+
+  // Add hover effect for visual feedback
+  rect.on("mouseover", function() {
+    this.setStyle({
+      color: 'rgba(255, 255, 255, 0.5)',
+      weight: 1.2
+    });
+  });
+
+  rect.on("mouseout", function() {
+    this.setStyle({
+      color: 'rgba(255, 255, 255, 0.25)',
+      weight: 0.6
+    });
+  });
 
   gpxLayers.push(rect);
 });
@@ -1788,6 +1845,19 @@ function addInfoControl() {
   :global(.mode-toggle-btn) {
     padding: 8px 16px;
     font-size: 0.75rem;
+  }
+}
+
+:global(.highlighted-cell) {
+  animation: pulseHighlight 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseHighlight {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
   }
 }
 
