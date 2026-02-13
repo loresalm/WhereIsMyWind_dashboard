@@ -310,41 +310,43 @@
 
   // Map initialization
   function initWindMap() {
-    const container = document.getElementById('wind-map');
-    if (!container) return;
-    
-    // Clean up existing map
-    if (windMap) {
-      try {
-        windMap.remove();
-      } catch(e) {
-        // Ignore errors
-      }
-      windMap = null;
+  const container = document.getElementById('wind-map');
+  if (!container) return;
+  
+  // Clean up existing map
+  if (windMap) {
+    try {
+      windMap.remove();
+    } catch(e) {
+      // Ignore errors
     }
-    
-    // Clear any existing tiles
-    container.innerHTML = '';
-
-    windMap = window.L.map(container, {
-      zoomControl: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      touchZoom: false,
-      boxZoom: false,
-      keyboard: false
-    }).setView(wannseeCenter, defaultZoom);
-
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap',
-      maxZoom: 19
-    }).addTo(windMap);
-
-    windMapLoaded = true;
-    windMapInitialized = true;
-    addWindInfoControl();
+    windMap = null;
   }
+  
+  // Clear any existing tiles
+  container.innerHTML = '';
+
+  windMap = window.L.map(container, {
+    zoomControl: false,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    touchZoom: false,
+    boxZoom: false,
+    keyboard: false
+  }).setView(wannseeCenter, defaultZoom);
+
+  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19
+  }).addTo(windMap);
+
+  windMapLoaded = true;
+  windMapInitialized = true;
+  addWindInfoControl();
+  addWindVizToggle();
+  addWindSpeedLegendControl(); // ADD THIS LINE
+}
 
   function addWindInfoControl() {
     if (!windMap) return;
@@ -438,6 +440,133 @@
       }
     }, 100);
   }
+
+function addWindVizToggle() {
+  if (!windMap) return;
+
+  const toggle = window.L.control({ position: 'topright' });
+
+  toggle.onAdd = function() {
+    const div = window.L.DomUtil.create('div', 'wind-viz-toggle');
+    
+    div.innerHTML = `
+      <div class="viz-toggle-container">
+        <button 
+          class="viz-toggle-btn ${visualizationMode === 'aggregate' ? 'active' : ''}" 
+          data-mode="aggregate"
+        >
+          Average
+        </button>
+        <button 
+          class="viz-toggle-btn ${visualizationMode === 'hourly' ? 'active' : ''}" 
+          data-mode="hourly"
+        >
+          Hourly
+        </button>
+      </div>
+    `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    window.L.DomEvent.disableScrollPropagation(div);
+    
+    return div;
+  };
+
+  toggle.addTo(windMap);
+
+  setTimeout(() => {
+    const buttons = document.querySelectorAll('.viz-toggle-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const newMode = e.target.dataset.mode;
+        if (newMode !== visualizationMode) {
+          visualizationMode = newMode;
+          
+          buttons.forEach(b => b.classList.remove('active'));
+          e.target.classList.add('active');
+        }
+      });
+    });
+  }, 100);
+}
+
+function addWindSpeedLegendControl() {
+  if (!windMap) return;
+
+  const legend = window.L.control({ position: 'bottomright' });
+
+  legend.onAdd = function() {
+    const div = window.L.DomUtil.create('div', 'wind-speed-legend-control');
+    
+    div.innerHTML = `
+      <div class="legend-container">
+        <div class="legend-header">
+          <h4 class="legend-title">Wind Speed (kts)</h4>
+          <button class="legend-toggle" data-legend="wind-speed">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="legend-content" data-legend-content="wind-speed">
+          <div class="legend-items">
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(100, 150, 255)"></div>
+              <span class="legend-label">0-2</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(120, 200, 255)"></div>
+              <span class="legend-label">2-5</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(150, 255, 150)"></div>
+              <span class="legend-label">5-9</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(255, 255, 100)"></div>
+              <span class="legend-label">9-13</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(255, 180, 80)"></div>
+              <span class="legend-label">13-19</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: rgb(255, 100, 100)"></div>
+              <span class="legend-label">19+</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    
+    return div;
+  };
+
+  legend.addTo(windMap);
+
+  // Add toggle functionality
+  setTimeout(() => {
+    const toggleBtn = document.querySelector('[data-legend="wind-speed"]');
+    const content = document.querySelector('[data-legend-content="wind-speed"]');
+    
+    if (toggleBtn && content) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCollapsed = content.style.display === 'none';
+        
+        if (isCollapsed) {
+          content.style.display = 'block';
+          toggleBtn.style.transform = 'rotate(0deg)';
+        } else {
+          content.style.display = 'none';
+          toggleBtn.style.transform = 'rotate(-90deg)';
+        }
+      });
+    }
+  }, 100);
+}
 
   function initSailingMap() {
     const container = document.getElementById('sailing-map');
@@ -753,24 +882,6 @@
           </div>
         {/if}
         
-        <!-- Visualization Mode Toggle -->
-        <div class="viz-toggle">
-          <button 
-            class="toggle-btn"
-            class:active={visualizationMode === 'aggregate'}
-            on:click={() => visualizationMode = 'aggregate'}
-          >
-            Average
-          </button>
-          <button 
-            class="toggle-btn"
-            class:active={visualizationMode === 'hourly'}
-            on:click={() => visualizationMode = 'hourly'}
-          >
-            Hourly
-          </button>
-        </div>
-        
         <!-- Wind Rose Overlay -->
         <div class="wind-rose-overlay">
           {#if loading}
@@ -842,23 +953,7 @@
         {/if}
       </div>
       
-      <!-- Sailing visualization toggle -->
-      <div class="viz-toggle">
-        <button
-          class="toggle-btn"
-          class:active={sailingVizMode === 'individual'}
-          on:click={() => switchSailingVizMode('individual')}
-        >
-          Tours
-        </button>
-        <button
-          class="toggle-btn"
-          class:active={sailingVizMode === 'average'}
-          on:click={() => switchSailingVizMode('average')}
-        >
-          Average
-        </button>
-      </div>
+      
 
       <div class="map-container">
         <div id="sailing-map" class="map"></div>
@@ -876,6 +971,7 @@
             mode={sailingVizMode}
             selectedAngleRanges={selectedAngleRanges}
             sailingPerformancePoints={sailingPerformancePoints}
+            onModeChange={switchSailingVizMode}
           />
         {/if}
       </div>
@@ -1066,45 +1162,6 @@
     pointer-events: none;
   }
 
-  .viz-toggle {
-    position: absolute;
-    top: 0.6rem;
-    right: 0.8rem;
-    z-index: 1001;
-    display: flex;
-    gap: 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    padding: 0.25rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .toggle-btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: 'Outfit', sans-serif;
-  }
-
-  .toggle-btn:hover {
-    color: rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .toggle-btn.active {
-    background: rgba(255, 255, 255, 0.9);
-    color: #000;
-  }
-
   .wind-rose-overlay {
     position: absolute;
     top: 50%;
@@ -1156,32 +1213,6 @@
     backdrop-filter: blur(10px);
   }
 
-  /* Wind Speed Legend */
-  .wind-speed-legend {
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    z-index: 1002;
-    background: rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
-    padding: 12px;
-    min-width: 140px;
-    color: white;
-    font-family: 'Outfit', sans-serif;
-    font-size: 0.7rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  }
-
-  .wind-speed-legend h4 {
-    margin: 0 0 10px 0;
-    font-size: 0.8rem;
-    text-align: center;
-    font-weight: 600;
-    color: white;
-  }
 
   .legend-bins {
     display: flex;
@@ -1446,4 +1477,133 @@
       font-size: 0.65rem;
     }
   }
+  /* Wind Viz Toggle Control */
+:global(.wind-viz-toggle) {
+  background: transparent;
+  border: none;
+}
+
+:global(.viz-toggle-container) {
+  display: flex;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:global(.viz-toggle-btn) {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+:global(.viz-toggle-btn:hover) {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:global(.viz-toggle-btn.active) {
+  background: rgba(255, 255, 255, 0.9);
+  color: #000;
+}
+
+/* Standardized Legend Styles */
+:global(.wind-speed-legend-control) {
+  background: transparent;
+  border: none;
+}
+
+:global(.legend-container) {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  font-family: 'Outfit', sans-serif;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+:global(.legend-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+:global(.legend-title) {
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: center;
+  font-weight: 600;
+  color: white;
+  flex: 1;
+}
+
+:global(.legend-toggle) {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+:global(.legend-toggle:hover) {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+:global(.legend-toggle svg) {
+  transition: transform 0.2s ease;
+}
+
+:global(.legend-content) {
+  transition: all 0.2s ease;
+}
+
+:global(.legend-items) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:global(.legend-item) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:global(.legend-color) {
+  width: 20px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+}
+
+:global(.legend-label) {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
+}
 </style>

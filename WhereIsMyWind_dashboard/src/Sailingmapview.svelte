@@ -12,6 +12,9 @@
   let gpxLayers = [];
   let legendControl;
 
+  export let onModeChange; // Add this prop
+  let modeToggleControl
+
   let cachedGrid = null;
   
   // Color palette for different tours
@@ -72,6 +75,55 @@
     }
   });
   gpxLayers = [];
+}
+
+function addModeToggleControl() {
+  if (!map) return;
+  
+  if (modeToggleControl && map) {
+    map.removeControl(modeToggleControl);
+    modeToggleControl = null;
+  }
+  
+  const toggle = window.L.control({ position: 'topright' });
+  
+  toggle.onAdd = function() {
+    const div = window.L.DomUtil.create('div', 'mode-toggle-control');
+    
+    div.innerHTML = `
+      <div class="mode-toggle-container">
+        <button class="mode-toggle-btn ${mode === 'individual' ? 'active' : ''}" data-mode="individual">
+          Tours
+        </button>
+        <button class="mode-toggle-btn ${mode === 'average' ? 'active' : ''}" data-mode="average">
+          Average
+        </button>
+      </div>
+    `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    window.L.DomEvent.disableScrollPropagation(div);
+    
+    return div;
+  };
+  
+  modeToggleControl = toggle;
+  modeToggleControl.addTo(map);
+  
+  setTimeout(() => {
+    const buttons = document.querySelectorAll('.mode-toggle-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const newMode = e.target.dataset.mode;
+        if (newMode !== mode && onModeChange) {
+          onModeChange(newMode); // Call the parent's function
+          
+          buttons.forEach(b => b.classList.remove('active'));
+          e.target.classList.add('active');
+        }
+      });
+    });
+  }, 100);
 }
 
 function pointInPolygon(lat, lon, polygon) {
@@ -239,12 +291,12 @@ function getNearbyIndexedPoints(center, index, cellSize = 50) {
     } else if (mode === 'average') {
       renderAveragePerformance();
     }
+    addModeToggleControl();
   }
 
-  function addBoatSpeedLegend() {
+function addBoatSpeedLegend() {
   if (!tours || tours.length === 0) return;
   
-  // Calculate min/max boat speeds across all tours
   const allSpeeds = tours.flatMap(tour => 
     tour.points.map(p => Number(p.boat_speed)).filter(v => !isNaN(v))
   );
@@ -262,7 +314,6 @@ function getNearbyIndexedPoints(center, index, cellSize = 50) {
     
     let gradientSVG = `<svg width="${gradientWidth + 50}" height="${gradientHeight + 30}" viewBox="0 0 ${gradientWidth + 50} ${gradientHeight + 30}" xmlns="http://www.w3.org/2000/svg">`;
     
-    // Create gradient stops
     for (let i = 0; i < numGradientSteps; i++) {
       const y = gradientHeight - ((i / numGradientSteps) * gradientHeight);
       const speed = minSpeed + (i / numGradientSteps) * (maxSpeed - minSpeed);
@@ -271,7 +322,6 @@ function getNearbyIndexedPoints(center, index, cellSize = 50) {
       gradientSVG += `<rect x="0" y="${y + topMargin}" width="${gradientWidth}" height="${gradientHeight/numGradientSteps}" fill="${color}" />`;
     }
     
-    // Add scale markers
     const numMarkers = 5;
     for (let i = 0; i <= numMarkers; i++) {
       const y = gradientHeight - ((i / numMarkers) * gradientHeight);
@@ -286,37 +336,54 @@ function getNearbyIndexedPoints(center, index, cellSize = 50) {
     gradientSVG += '</svg>';
     
     div.innerHTML = `
-      <div style="
-        background: rgba(0, 0, 0, 0.2);
-        backdrop-filter: blur(10px);
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: white;
-        font-family: 'Outfit', sans-serif;
-        font-size: 0.7rem;
-        min-width: 120px;
-      ">
-        <h4 style="margin: 0 0 10px 0; font-size: 0.8rem; text-align: center;">Boat Speed (kts)</h4>
-        <div style="display: flex; align-items: center; margin-bottom: 8px;">
-          <div>
-            ${gradientSVG}
-          </div>
+      <div class="legend-container">
+        <div class="legend-header">
+          <h4 class="legend-title">Boat Speed (kts)</h4>
+          <button class="legend-toggle" data-legend="boat-speed">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="legend-content" data-legend-content="boat-speed">
+          ${gradientSVG}
         </div>
       </div>
     `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    
     return div;
   };
 
   const boatLegend = legend;
   boatLegend.addTo(map);
-  gpxLayers.push({ __legend: boatLegend }); // Store for cleanup
+  gpxLayers.push({ __legend: boatLegend });
+
+  setTimeout(() => {
+    const toggleBtn = document.querySelector('[data-legend="boat-speed"]');
+    const content = document.querySelector('[data-legend-content="boat-speed"]');
+    
+    if (toggleBtn && content) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCollapsed = content.style.display === 'none';
+        
+        if (isCollapsed) {
+          content.style.display = 'block';
+          toggleBtn.style.transform = 'rotate(0deg)';
+        } else {
+          content.style.display = 'none';
+          toggleBtn.style.transform = 'rotate(-90deg)';
+        }
+      });
+    }
+  }, 100);
 }
 
 function addWindSpeedLegend() {
   if (!tours || tours.length === 0) return;
   
-  // Calculate min/max wind speeds across all tours
   const allWindSpeeds = tours.flatMap(tour => 
     tour.points.map(p => Number(p.wind_speed)).filter(v => !isNaN(v))
   );
@@ -332,36 +399,23 @@ function addWindSpeedLegend() {
   legend.onAdd = function() {
     const div = window.L.DomUtil.create('div', 'wind-speed-legend');
     
-    // Check if wind speed is constant
     const isConstant = minWind === maxWind;
     
+    let contentHTML = '';
+    
     if (isConstant) {
-      // Show single color box with value
       const singleColor = windSpeedToColor(minWind, minWind, maxWind);
-      div.innerHTML = `
-        <div style="
-          background: rgba(0, 0, 0, 0.2);
-          backdrop-filter: blur(10px);
-          padding: 10px;
-          border-radius: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          color: white;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.7rem;
-          min-width: 100px;
-        ">
-          <h4 style="margin: 0 0 8px 0; font-size: 0.8rem; text-align: center;">Wind Speed</h4>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <div style="width: 20px; height: 20px; background: ${singleColor}; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 3px;"></div>
-            <div style="font-size: 0.75rem; font-weight: 600;">${minWind.toFixed(1)} kts</div>
+      contentHTML = `
+        <div class="legend-items">
+          <div class="legend-item">
+            <div class="legend-color" style="background: ${singleColor}; width: 20px; height: 20px;"></div>
+            <span class="legend-label">${minWind.toFixed(1)} kts</span>
           </div>
         </div>
       `;
     } else {
-      // Show gradient as before
       let gradientSVG = `<svg width="${gradientWidth + 50}" height="${gradientHeight + 30}" viewBox="0 0 ${gradientWidth + 50} ${gradientHeight + 30}" xmlns="http://www.w3.org/2000/svg">`;
       
-      // Create gradient stops
       for (let i = 0; i < numGradientSteps; i++) {
         const y = gradientHeight - ((i / numGradientSteps) * gradientHeight);
         const speed = minWind + (i / numGradientSteps) * (maxWind - minWind);
@@ -370,7 +424,6 @@ function addWindSpeedLegend() {
         gradientSVG += `<rect x="0" y="${y + topMargin}" width="${gradientWidth}" height="${gradientHeight/numGradientSteps}" fill="${color}" />`;
       }
       
-      // Add scale markers
       const numMarkers = 5;
       for (let i = 0; i <= numMarkers; i++) {
         const y = gradientHeight - ((i / numMarkers) * gradientHeight);
@@ -383,34 +436,53 @@ function addWindSpeedLegend() {
       }
       
       gradientSVG += '</svg>';
-      
-      div.innerHTML = `
-        <div style="
-          background: rgba(0, 0, 0, 0.2);
-          backdrop-filter: blur(10px);
-          padding: 10px;
-          border-radius: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          color: white;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.7rem;
-          min-width: 120px;
-        ">
-          <h4 style="margin: 0 0 10px 0; font-size: 0.8rem; text-align: center;">Wind Speed (kts)</h4>
-          <div style="display: flex; align-items: center; margin-bottom: 8px;">
-            <div>
-              ${gradientSVG}
-            </div>
-          </div>
-        </div>
-      `;
+      contentHTML = gradientSVG;
     }
+    
+    div.innerHTML = `
+      <div class="legend-container">
+        <div class="legend-header">
+          <h4 class="legend-title">Wind Speed (kts)</h4>
+          <button class="legend-toggle" data-legend="wind-speed-sailing">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="legend-content" data-legend-content="wind-speed-sailing">
+          ${contentHTML}
+        </div>
+      </div>
+    `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    
     return div;
   };
 
   const windLegend = legend;
   windLegend.addTo(map);
-  gpxLayers.push({ __legend: windLegend }); // Store for cleanup
+  gpxLayers.push({ __legend: windLegend });
+
+  setTimeout(() => {
+    const toggleBtn = document.querySelector('[data-legend="wind-speed-sailing"]');
+    const content = document.querySelector('[data-legend-content="wind-speed-sailing"]');
+    
+    if (toggleBtn && content) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCollapsed = content.style.display === 'none';
+        
+        if (isCollapsed) {
+          content.style.display = 'block';
+          toggleBtn.style.transform = 'rotate(0deg)';
+        } else {
+          content.style.display = 'none';
+          toggleBtn.style.transform = 'rotate(-90deg)';
+        }
+      });
+    }
+  }, 100);
 }
 
 
@@ -710,74 +782,87 @@ filteredPoints.forEach(p => {
     addInfoControl();
   }
 
-  function addDynamicSpeedRatioLegend() {
-    if (legendControl && map) {
-      map.removeControl(legendControl);
+function addDynamicSpeedRatioLegend() {
+  if (legendControl && map) {
+    map.removeControl(legendControl);
+  }
+
+  const legend = window.L.control({ position: 'bottomright' });
+
+  legend.onAdd = function() {
+    const div = window.L.DomUtil.create('div', 'speed-ratio-legend');
+    
+    const gradientHeight = 100;
+    const gradientWidth = 15;
+    const numGradientSteps = 100;
+    
+    let gradientSVG = `<svg width="${gradientWidth + 50}" height="${gradientHeight + 30}" viewBox="0 0 ${gradientWidth + 50} ${gradientHeight + 30}" xmlns="http://www.w3.org/2000/svg">`;
+    
+    for (let i = 0; i < numGradientSteps; i++) {
+      const y = gradientHeight - ((i / numGradientSteps) * gradientHeight);
+      const ratio = minSpeedRatio + (i / numGradientSteps) * (maxSpeedRatio - minSpeedRatio);
+      const color = speedRatioToColor(ratio, minSpeedRatio, maxSpeedRatio);
+      
+      gradientSVG += `<rect x="0" y="${y + topMargin}" width="${gradientWidth}" height="${gradientHeight/numGradientSteps}" fill="${color}" />`;
     }
-
-    const legend = window.L.control({ position: 'bottomright' });
-
-    legend.onAdd = function() {
-      const div = window.L.DomUtil.create('div', 'speed-ratio-legend');
+    
+    const numMarkers = 5;
+    for (let i = 0; i <= numMarkers; i++) {
+      const y = gradientHeight - ((i / numMarkers) * gradientHeight);
+      const ratio = minSpeedRatio + (i / numMarkers) * (maxSpeedRatio - minSpeedRatio);
       
-      // Create a gradient legend showing the full color range
-      const gradientHeight = 100;
-      const gradientWidth = 15;
-      const numGradientSteps = 100;
-      
-      // Create gradient SVG
-        let gradientSVG = `<svg width="${gradientWidth + 50}" height="${gradientHeight + 30}" viewBox="0 0 ${gradientWidth + 50} ${gradientHeight + 30}" xmlns="http://www.w3.org/2000/svg">`;
-      // Create gradient stops
-      for (let i = 0; i < numGradientSteps; i++) {
-        const y = gradientHeight - ((i / numGradientSteps) * gradientHeight);  // Reversed
-        const ratio = minSpeedRatio + (i / numGradientSteps) * (maxSpeedRatio - minSpeedRatio);
-        const color = speedRatioToColor(ratio, minSpeedRatio, maxSpeedRatio);
-        
-        gradientSVG += `<rect x="0" y="${y + topMargin}" width="${gradientWidth}" height="${gradientHeight/numGradientSteps}" fill="${color}" />`;
-
-      }
-      
-      // Add scale markers
-      const numMarkers = 5;
-      for (let i = 0; i <= numMarkers; i++) {
-        const y = gradientHeight - ((i / numMarkers) * gradientHeight);  // Reversed
-        const ratio = minSpeedRatio + (i / numMarkers) * (maxSpeedRatio - minSpeedRatio);
-        const markerY = y - 2;
-        
-        gradientSVG += `
+      gradientSVG += `
         <line x1="${gradientWidth}" y1="${y + topMargin}" x2="${gradientWidth + 5}" y2="${y + topMargin}" stroke="white" stroke-width="1" />
         <text x="${gradientWidth + 10}" y="${y + topMargin + 4}" font-size="10" fill="white" font-family="'Outfit', sans-serif">${ratio.toFixed(2)}</text>
-        `;
-      }
-      
-      gradientSVG += '</svg>';
-      
-      div.innerHTML = `
-        <div style="
-          background: rgba(0, 0, 0, 0.2);
-          backdrop-filter: blur(10px);
-          padding: 10px;
-          border-radius: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          color: white;
-          font-family: 'Outfit', sans-serif;
-          font-size: 0.7rem;
-          min-width: 140px;
-        ">
-          <h4 style="margin: 0 0 10px 0; font-size: 0.8rem; text-align: center;">Speed Ratio</h4>
-          <div style="display: flex; align-items: center; margin-bottom: 8px;">
-            <div style="margin-right: 10px;">
-              ${gradientSVG}
-            </div>
-          </div>
-        </div>
       `;
-      return div;
-    };
+    }
+    
+    gradientSVG += '</svg>';
+    
+    div.innerHTML = `
+      <div class="legend-container">
+        <div class="legend-header">
+          <h4 class="legend-title">Speed Ratio</h4>
+          <button class="legend-toggle" data-legend="speed-ratio">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="legend-content" data-legend-content="speed-ratio">
+          ${gradientSVG}
+        </div>
+      </div>
+    `;
+    
+    window.L.DomEvent.disableClickPropagation(div);
+    
+    return div;
+  };
 
-    legendControl = legend;
-    legendControl.addTo(map);
-  }
+  legendControl = legend;
+  legendControl.addTo(map);
+
+  setTimeout(() => {
+    const toggleBtn = document.querySelector('[data-legend="speed-ratio"]');
+    const content = document.querySelector('[data-legend-content="speed-ratio"]');
+    
+    if (toggleBtn && content) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCollapsed = content.style.display === 'none';
+        
+        if (isCollapsed) {
+          content.style.display = 'block';
+          toggleBtn.style.transform = 'rotate(0deg)';
+        } else {
+          content.style.display = 'none';
+          toggleBtn.style.transform = 'rotate(-90deg)';
+        }
+      });
+    }
+  }, 100);
+}
 
   // ... rest of the functions remain the same (addTourToMap, speedToColor, etc.) ...
 
@@ -1006,111 +1091,115 @@ function createFlagMarker(latLon, label) {
   return marker;
 }
 
-  function createHoverPoint(point, nextPoint, color) {
-    // Use boat_heading from dataset (already computed with centered difference)
-    let boatDirection = point.boat_heading;
-    
-    // Handle null/NaN/0 cases
-    if (!boatDirection || isNaN(boatDirection) || boatDirection === 0) {
-      boatDirection = null;  // Will display as "N/A"
-    }
-
-    let windBoatDiff = null;
-    if (boatDirection !== null && point.wind_dir) {
-      windBoatDiff = Math.abs(point.wind_dir - boatDirection);
-      if (windBoatDiff > 180) windBoatDiff = 360 - windBoatDiff;
-    }
-
-    const popupContent = `
-      <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
-        <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-          
-          <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-            <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Wind</div>
-            <div style="display: flex; justify-content: space-between; gap: 0.8rem;">
-              <div>
-                <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Speed</div>
-                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.wind_speed).toFixed(1)} kts</div>
-              </div>
-              <div>
-                <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Dir</div>
-                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Math.round(point.wind_dir)}°</div>
-              </div>
-            </div>
-          </div>
-
-          <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-            <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Boat</div>
-            <div style="display: flex; justify-content: space-between; gap: 0.8rem;">
-              <div>
-                <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Speed</div>
-                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.boat_speed).toFixed(1)} kts</div>
-              </div>
-              <div>
-                <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Dir</div>
-                <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${boatDirection ? Math.round(boatDirection) + '°' : 'N/A'}</div>
-              </div>
-            </div>
-          </div>
-
-          <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
-            <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;">Angle Diff</div>
-            <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${windBoatDiff !== null ? Math.round(windBoatDiff) + '°' : 'N/A'}</div>
-          </div>
-
-        </div>
-      </div>
-    `;
-    
-    const hoverIcon = window.L.divIcon({
-      html: `<div class="hover-dot"></div>`,
-      className: 'hover-point',
-      iconSize: [6, 6],
-      iconAnchor: [3, 3]
-    });
-    
-    const marker = window.L.marker(
-      [Number(point.lat), Number(point.lon)],
-      { 
-        icon: hoverIcon,
-        interactive: true
-      }
-    ).addTo(map);
-    
-    marker.bindPopup(popupContent, {
-  closeButton: false,
-  offset: [0, -6],
-  autoPan: true,
-  autoPanPadding: [50, 50],
-  className: 'fixed-size-popup'
-});
-    
-    marker.on('mouseover', function (e) {
-      const el = e.target.getElement();
-      if (el) {
-        const dot = el.querySelector('.hover-dot');
-        if (dot) {
-          dot.style.opacity = '1';
-          dot.style.transform = 'scale(1)';
-        }
-      }
-      this.openPopup();
-    });
-
-    marker.on('mouseout', function (e) {
-      const el = e.target.getElement();
-      if (el) {
-        const dot = el.querySelector('.hover-dot');
-        if (dot) {
-          dot.style.opacity = '0';
-          dot.style.transform = 'scale(0.8)';
-        }
-      }
-      this.closePopup();
-    });
-    
-    gpxLayers.push(marker);
+function createHoverPoint(point, nextPoint, color) {
+  // Use boat_heading from dataset (already computed with centered difference)
+  let boatDirection = point.boat_heading;
+  
+  // Handle null/NaN/0 cases
+  if (!boatDirection || isNaN(boatDirection) || boatDirection === 0) {
+    boatDirection = null;  // Will display as "N/A"
   }
+
+  let windBoatDiff = null;
+  if (boatDirection !== null && point.wind_dir) {
+    windBoatDiff = Math.abs(point.wind_dir - boatDirection);
+    if (windBoatDiff > 180) windBoatDiff = 360 - windBoatDiff;
+  }
+
+  const popupContent = `
+    <div style="font-family: 'Outfit', sans-serif; font-size: 0.7rem; line-height: 1.3;">
+      <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+        
+        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
+          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Wind</div>
+          <div style="display: flex; justify-content: space-between; gap: 0.8rem;">
+            <div>
+              <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Speed</div>
+              <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.wind_speed).toFixed(1)} kts</div>
+            </div>
+            <div>
+              <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Dir</div>
+              <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Math.round(point.wind_dir)}°</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
+          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Boat</div>
+          <div style="display: flex; justify-content: space-between; gap: 0.8rem;">
+            <div>
+              <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Speed</div>
+              <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${Number(point.boat_speed).toFixed(1)} kts</div>
+            </div>
+            <div>
+              <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.4); margin-bottom: 0.1rem;">Dir</div>
+              <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${boatDirection ? Math.round(boatDirection) + '°' : 'N/A'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(12px); padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.12);">
+          <div style="font-size: 0.55rem; color: rgba(255, 255, 255, 0.5); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;">Angle Diff</div>
+          <div style="font-size: 0.75rem; font-weight: 600; color: rgba(255, 255, 255, 0.95);">${windBoatDiff !== null ? Math.round(windBoatDiff) + '°' : 'N/A'}</div>
+        </div>
+
+      </div>
+    </div>
+  `;
+  
+  const hoverIcon = window.L.divIcon({
+    html: `<div class="hover-dot"></div>`,
+    className: 'hover-point',
+    iconSize: [6, 6],
+    iconAnchor: [3, 3]
+  });
+  
+  const marker = window.L.marker(
+    [Number(point.lat), Number(point.lon)],
+    { 
+      icon: hoverIcon,
+      interactive: true
+    }
+  ).addTo(map);
+  
+  marker.bindPopup(popupContent, {
+    closeButton: false,
+    offset: [0, -6],
+    autoPan: true,
+    autoPanPadding: [50, 50],
+    className: 'fixed-size-popup'
+  });
+  
+  // Change from mouseover/mouseout to click
+  marker.on('click', function (e) {
+    this.openPopup();
+  });
+  
+  // Show dot on hover (visual feedback only)
+  marker.on('mouseover', function (e) {
+    const el = e.target.getElement();
+    if (el) {
+      const dot = el.querySelector('.hover-dot');
+      if (dot) {
+        dot.style.opacity = '1';
+        dot.style.transform = 'scale(1.2)';
+      }
+    }
+  });
+
+  marker.on('mouseout', function (e) {
+    const el = e.target.getElement();
+    if (el) {
+      const dot = el.querySelector('.hover-dot');
+      if (dot) {
+        dot.style.opacity = '0';
+        dot.style.transform = 'scale(0.8)';
+      }
+    }
+  });
+  
+  gpxLayers.push(marker);
+}
 
   function bearingBetweenPoints(p1, p2) {
     const lat1 = Number(p1.lat) * Math.PI / 180;
@@ -1313,6 +1402,10 @@ function addInfoControl() {
       map.removeControl(legendControl);
       legendControl = null;
     }
+    if (modeToggleControl && map) {
+      map.removeControl(modeToggleControl);
+      modeToggleControl = null;
+    }
   }
 
 </script>
@@ -1325,12 +1418,6 @@ function addInfoControl() {
   :global(.custom-marker) {
     background: transparent !important;
     border: none !important;
-  }
-
-  :global(.hover-point) {
-    background: transparent !important;
-    border: none !important;
-    cursor: pointer !important;
   }
 
   :global(.fixed-size-popup .leaflet-popup-content-wrapper) {
@@ -1360,17 +1447,28 @@ function addInfoControl() {
   }
 
   :global(.hover-dot) {
-    width: 6px;
-    height: 6px;
-    background: rgba(0, 0, 0, 0.85);
-    border: 1.5px solid rgba(255, 255, 255, 0.9);
-    border-radius: 50%;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-    opacity: 0;
-    transform: scale(0.8);
-    transition: opacity 0.12s ease, transform 0.12s ease;
-    pointer-events: none;
-  }
+  width: 6px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+
+:global(.hover-point) {
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+}
+
+:global(.hover-point:hover .hover-dot) {
+  opacity: 1 !important;
+  transform: scale(1.2) !important;
+}
 
   :global(.dot-tooltip .leaflet-tooltip-content) {
     font-family: 'Outfit', sans-serif !important;
@@ -1378,10 +1476,94 @@ function addInfoControl() {
     line-height: 1.3 !important;
   }
 
-  :global(.speed-ratio-legend) {
-    background: transparent !important;
-    border: none !important;
-  }
+/* Standardized Legend Styles */
+:global(.boat-speed-legend),
+:global(.wind-speed-legend),
+:global(.speed-ratio-legend) {
+  background: transparent !important;
+  border: none !important;
+}
+
+:global(.legend-container) {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  font-family: 'Outfit', sans-serif;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+:global(.legend-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+:global(.legend-title) {
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: center;
+  font-weight: 600;
+  color: white;
+  flex: 1;
+}
+
+:global(.legend-toggle) {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+:global(.legend-toggle:hover) {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+:global(.legend-toggle svg) {
+  transition: transform 0.2s ease;
+}
+
+:global(.legend-content) {
+  transition: all 0.2s ease;
+}
+
+:global(.legend-items) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:global(.legend-item) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:global(.legend-color) {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+:global(.legend-label) {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
 
   /* INFO CONTROL STYLES */
   :global(.info-control) {
@@ -1561,13 +1743,52 @@ function addInfoControl() {
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
 }
 
-:global(.hover-dot) {
-  opacity: 0 !important; /* Hidden by default */
-  transition: opacity 0.2s ease;
+/* MODE TOGGLE CONTROL STYLES */
+:global(.mode-toggle-control) {
+  background: transparent;
+  border: none;
 }
 
-:global(.hover-point:hover .hover-dot) {
-  opacity: 1 !important;
+:global(.mode-toggle-container) {
+  display: flex;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:global(.mode-toggle-btn) {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+:global(.mode-toggle-btn:hover) {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:global(.mode-toggle-btn.active) {
+  background: rgba(255, 255, 255, 0.9);
+  color: #000;
+}
+
+@media (max-width: 768px) {
+  :global(.mode-toggle-btn) {
+    padding: 8px 16px;
+    font-size: 0.75rem;
+  }
 }
 
 
