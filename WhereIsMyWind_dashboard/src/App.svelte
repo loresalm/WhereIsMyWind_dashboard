@@ -659,10 +659,13 @@
 </script>
 
 <div class="app-container">
+  <!-- 
   <header class="header">
     <h1>Wannsee Wind</h1>
     <p>Wind Data & Sailing Tour Visualization • Berlin</p>
   </header>
+  -->
+
   
   <!-- View Mode Toggle -->
   <div class="view-toggle-card glass-card">
