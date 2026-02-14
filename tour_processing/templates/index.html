@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Regatta Annotator</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body { margin: 0; }
+        #map { height: 90vh; }
+        #controls { padding: 10px; background: #eee; }
+
+        .mark-label {
+            background: white;
+            border: 2px solid black;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    Select Tour:
+    <select id="tourSelect">
+        {% for t in tours %}
+        <option value="{{t}}">{{t.split('/')[-1]}}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<div id="map"></div>
+
+<script>
+let map = L.map('map').setView([52.43, 13.17], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+let trackLayers = [];
+let markMarkers = [];
+let currentTour = null;
+
+const labels = ["S","F"];
+for (let i=1; i<=10; i++) labels.push("M"+i);
+
+
+// ===== TURBO COLORMAP =====
+function turbo(t) {
+    const r = Math.max(0, Math.min(255, Math.round(255*(1.5 - Math.abs(4*t-3)))));
+    const g = Math.max(0, Math.min(255, Math.round(255*(1.5 - Math.abs(4*t-2)))));
+    const b = Math.max(0, Math.min(255, Math.round(255*(1.5 - Math.abs(4*t-1)))));
+    return `rgb(${r},${g},${b})`;
+}
+
+
+// ===== CLEAR MAP =====
+function clearMap() {
+    trackLayers.forEach(l => map.removeLayer(l));
+    markMarkers.forEach(m => map.removeLayer(m));
+    trackLayers = [];
+    markMarkers = [];
+}
+
+
+// ===== DRAW TRACK WITH GRADIENT =====
+function drawGradientTrack(points) {
+    const n = points.length;
+
+    for (let i=0; i<n-1; i++) {
+        const color = turbo(i / n);
+
+        let segment = L.polyline(
+            [points[i], points[i+1]],
+            {color: color, weight: 4}
+        ).addTo(map);
+
+        trackLayers.push(segment);
+    }
+
+    map.fitBounds(points);
+}
+
+
+// ===== LOAD TOUR =====
+function loadTour(tour) {
+    currentTour = tour;
+    clearMap();
+
+    fetch(`/get_track/${encodeURIComponent(tour)}`)
+        .then(r => r.json())
+        .then(data => {
+
+            drawGradientTrack(data.points);
+
+            data.marks.forEach(m => addMark(m));
+        });
+}
+
+
+// ===== ADD MARKER WITH LABEL =====
+function addMark(mark) {
+    let marker = L.marker([mark.lat, mark.lon]).addTo(map);
+
+    marker.bindTooltip(mark.label, {
+        permanent: true,
+        direction: "top",
+        className: "mark-label"
+    });
+
+    marker.on("click", function() {
+        if (!confirm("Delete mark " + mark.label + " ?")) return;
+
+        fetch("/delete_mark", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                tour: currentTour,
+                label: mark.label
+            })
+        }).then(() => {
+            map.removeLayer(marker);
+        });
+    });
+
+    markMarkers.push(marker);
+}
+
+
+
+
+// ===== CLICK HANDLER =====
+map.on('click', function(e) {
+
+    if (!currentTour) return;
+
+    let label = prompt(
+        "Enter label:\nS = Start\nF = Finish\nM1..M10",
+        "M1"
+    );
+
+    if (!labels.includes(label)) {
+        alert("Invalid label");
+        return;
+    }
+
+    fetch("/save_mark", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            tour: currentTour,
+            lat: e.latlng.lat,
+            lon: e.latlng.lng,
+            label: label
+        })
+    }).then(() => {
+        addMark({
+            lat: e.latlng.lat,
+            lon: e.latlng.lng,
+            label: label
+        });
+    });
+});
+
+
+// ===== TOUR SELECTOR =====
+document.getElementById("tourSelect").addEventListener("change", e => {
+    loadTour(e.target.value);
+});
+
+
+// load first
+loadTour(document.getElementById("tourSelect").value);
+
+</script>
+
+</body>
+</html>
