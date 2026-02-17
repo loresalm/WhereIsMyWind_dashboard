@@ -743,11 +743,11 @@ function addWindSpeedLegendControl() {
   }
 
   async function switchSailingVizMode(newMode) {
-    sailingVizMode = newMode;
+  sailingVizMode = newMode;
 
-    if (newMode === 'average' && sailingPerformancePoints.length === 0) {
-      await loadPerformancePointsAsync();
-    }
+  if (newMode === 'average' && sailingPerformancePoints.length === 0) {
+    await loadPerformancePointsAsync();
+  }
 
     await tick();
     
@@ -924,16 +924,16 @@ function addWindSpeedLegendControl() {
   {:else}
     <!-- Sailing View -->
     <div class="glass-card filter-card">
-      {#if sailingVizMode === 'individual'}
-        <SailingTourSelector 
-          bind:dateGroups={sailingDateGroups}
-          bind:selectedTours={selectedTourIds}
-        />
-      {:else}
-        <AngleRangeSelector
-          bind:selectedRanges={selectedAngleRanges}
-        />
-      {/if}
+      {#if sailingVizMode === 'individual' || sailingVizMode === 'vmg'}
+      <SailingTourSelector 
+        bind:dateGroups={sailingDateGroups}
+        bind:selectedTours={selectedTourIds}
+      />
+    {:else}
+      <AngleRangeSelector
+        bind:selectedRanges={selectedAngleRanges}
+      />
+    {/if}
     </div>
 
     <div class="glass-card map-card">
@@ -976,7 +976,7 @@ function addWindSpeedLegendControl() {
         {/if}
       </div>
       
-      {#if sailingVizMode === 'individual' && selectedSailingTours.length > 0}
+      {#if (sailingVizMode === 'individual' || sailingVizMode === 'vmg') && selectedSailingTours.length > 0}
         <div class="stats-container">
           <div class="stat-item">
             <div class="stat-value">{selectedSailingTours.reduce((sum, t) => sum + t.points.length, 0)}</div>

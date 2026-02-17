@@ -1,12 +1,18 @@
 <script>
   import { onMount } from 'svelte';
   import flagIconSvg from './lib/assets/icons/startstopflag.svg?raw';
+import { speedToColor } from './lib/utils/colors.js';
    
   export let tours = [];
   export let map = null;
   export let mode; // 'individual' | 'average'
   export let selectedAngleRanges = [];
   export let sailingPerformancePoints = [];
+  
+
+  let vmgMin = 0;
+  let vmgMax = 1;
+
 
   // existing state
   let gpxLayers = [];
@@ -88,6 +94,375 @@ function clearLayers() {
   gpxLayers = [];
 }
 
+function parseVMGComment(raw) {
+  if (!raw) return null;
+
+  const result = {};
+
+  // VMG ratio value + quality label
+  const ratioMatch = raw.match(/VMG ratio ([\d.]+) is (\w+)/i);
+  if (ratioMatch) {
+    result.ratioValue = ratioMatch[1];
+    result.ratioLabel = ratioMatch[2]; // "moderate", "poor", "good"
+  }
+
+  // TWA + sailing assessment
+  const twaMatch = raw.match(/TWA ([\d.]+)°:\s*([^.]+)\./i);
+  if (twaMatch) {
+    result.twaValue = twaMatch[1];
+    result.twaAssessment = twaMatch[2].trim(); // "sailing too deep downwind"
+  }
+
+  // Boat/Wind speed ratio
+  const bwRatioMatch = raw.match(/Boat\/Wind speed ratio = ([\d.]+)/i);
+  if (bwRatioMatch) result.bwRatio = bwRatioMatch[1];
+
+  // VMG m/s, BoatSpeed, WindSpeed
+  const speedMatch = raw.match(/VMG = ([\d.]+) m\/s from BoatSpeed ([\d.]+) and WindSpeed ([\d.]+)/i);
+  if (speedMatch) {
+    result.vmgMs      = speedMatch[1];
+    result.boatSpeed2 = speedMatch[2];
+    result.windSpeed2 = speedMatch[3];
+  }
+
+  return result;
+}
+
+function computeVMGRange(tours) {
+  let values = [];
+
+  tours.forEach(tour => {
+
+    tour.points.forEach(p => {
+      if (p.vmg_ratio != null) values.push(Number(p.vmg_ratio));
+    });
+  });
+
+  if (values.length === 0) {
+    vmgMin = 0;
+    vmgMax = 1;
+    return;
+  }
+
+  vmgMin = Math.min(...values);
+  vmgMax = Math.max(...values);
+}
+
+
+function vmgRatioToColor(value) {
+  if (vmgMax === vmgMin) return 'rgb(0, 120, 255)';
+  const t = Math.max(0, Math.min(1, (value - vmgMin) / (vmgMax - vmgMin)));
+  return speedToColor(vmgMin + t * (vmgMax - vmgMin), vmgMin, vmgMax);
+}
+
+
+function renderVMGMode() {
+  computeVMGRange(tours);
+
+  tours.forEach(tour => {
+    const WIND_SAMPLE_RATE = 10;
+
+    // Colored polyline segments by vmg_ratio
+    for (let i = 0; i < tour.points.length - 1; i++) {
+      const p1 = tour.points[i];
+      const p2 = tour.points[i + 1];
+      if (p1.vmg_ratio == null || isNaN(Number(p1.vmg_ratio))) continue;
+
+      const segment = window.L.polyline(
+        [
+          [Number(p1.lat), Number(p1.lon)],
+          [Number(p2.lat), Number(p2.lon)]
+        ],
+        {
+          color: vmgRatioToColor(Number(p1.vmg_ratio)),
+          weight: 3,
+          opacity: 0.85,
+          lineCap: 'round'
+        }
+      ).addTo(map);
+      gpxLayers.push(segment);
+    }
+
+    // Start / end flags
+    const startPoint = tour.points[0];
+    const endPoint = tour.points[tour.points.length - 1];
+    gpxLayers.push(createFlagMarker([startPoint.lat, startPoint.lon], `Start: ${tour.start_time}`));
+    gpxLayers.push(createFlagMarker([endPoint.lat, endPoint.lon], `End: ${tour.end_time}`));
+
+    // Wind + boat direction arrows (sampled, same as individual mode)
+    tour.points.forEach((point, idx) => {
+      if (idx % WIND_SAMPLE_RATE !== 0) return;
+      if (!point.wind_speed || !point.wind_dir) return;
+
+      // Black wind direction arrow
+      drawDirectionArrow(point, point.wind_dir, 80, 'rgba(0, 0, 0, 0.7)', 1);
+
+      // Black boat direction arrow
+      if (point.boat_heading && !isNaN(point.boat_heading) && point.boat_heading !== 0) {
+        drawDirectionArrow(point, point.boat_heading, 60, 'rgba(0, 0, 0, 0.7)', 1);
+      }
+    });
+
+    // Clickable hover points for popup
+    tour.points.forEach((point) => {
+      if (point.vmg_ratio == null) return;
+
+      const hoverIcon = window.L.divIcon({
+        html: `<div class="hover-dot"></div>`,
+        className: 'hover-point',
+        iconSize: [6, 6],
+        iconAnchor: [3, 3]
+      });
+
+      const twa       = point.twa        != null ? Math.round(point.twa) + '°'           : 'N/A';
+      const vmg       = point.vmg        != null ? Number(point.vmg).toFixed(2) + ' kts' : 'N/A';
+      const vmgRatio  = point.vmg_ratio  != null ? Number(point.vmg_ratio).toFixed(3)    : 'N/A';
+      const boatSpeed = point.boat_speed != null ? Number(point.boat_speed).toFixed(1) + ' kts' : 'N/A';
+      const windSpeed = point.wind_speed != null ? Number(point.wind_speed).toFixed(1) + ' kts' : 'N/A';
+      const comment = parseVMGComment(point.vmg_comment);
+
+      const popupContent = `
+        <div style="font-family:'Outfit',sans-serif;font-size:0.7rem;line-height:1.4;">
+
+          <div style="background:rgba(255,255,255,0.06);backdrop-filter:blur(12px);
+                      padding:0.45rem 0.55rem;border-radius:6px;
+                      border:1px solid rgba(255,255,255,0.12);margin-bottom:5px;">
+            <div style="font-size:0.55rem;color:rgba(255,255,255,0.5);
+                        text-transform:uppercase;margin-bottom:0.2rem;">VMG</div>
+            <div style="display:flex;justify-content:space-between;gap:0.8rem;">
+              <div>
+                <div style="font-size:0.55rem;color:rgba(255,255,255,0.4);">Value</div>
+                <div style="font-size:0.75rem;font-weight:600;color:white;">${vmg}</div>
+              </div>
+              <div>
+                <div style="font-size:0.55rem;color:rgba(255,255,255,0.4);">Ratio</div>
+                <div style="font-size:0.75rem;font-weight:600;color:white;">${vmgRatio}</div>
+              </div>
+              <div>
+                <div style="font-size:0.55rem;color:rgba(255,255,255,0.4);">TWA</div>
+                <div style="font-size:0.75rem;font-weight:600;color:white;">${twa}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.06);backdrop-filter:blur(12px);
+                      padding:0.45rem 0.55rem;border-radius:6px;
+                      border:1px solid rgba(255,255,255,0.12);margin-bottom:5px;">
+            <div style="font-size:0.55rem;color:rgba(255,255,255,0.5);
+                        text-transform:uppercase;margin-bottom:0.2rem;">Speeds</div>
+            <div style="display:flex;justify-content:space-between;gap:0.8rem;">
+              <div>
+                <div style="font-size:0.55rem;color:rgba(255,255,255,0.4);">Boat</div>
+                <div style="font-size:0.75rem;font-weight:600;color:white;">${boatSpeed}</div>
+              </div>
+              <div>
+                <div style="font-size:0.55rem;color:rgba(255,255,255,0.4);">Wind</div>
+                <div style="font-size:0.75rem;font-weight:600;color:white;">${windSpeed}</div>
+              </div>
+            </div>
+          </div>
+
+          ${comment ? `
+          <div style="background:rgba(255,255,255,0.06);backdrop-filter:blur(12px);
+                      padding:0.45rem 0.55rem;border-radius:6px;
+                      border:1px solid rgba(255,255,255,0.12);">
+            <div style="font-size:0.55rem;color:rgba(255,255,255,0.5);
+                        text-transform:uppercase;margin-bottom:0.25rem;">Analysis</div>
+
+            ${comment.ratioLabel ? `
+              <div style="display:inline-block;margin-bottom:0.4rem;
+                          padding:0.15rem 0.45rem;border-radius:20px;font-size:0.65rem;
+                          font-weight:600;letter-spacing:0.03em;
+                          background:${
+                            comment.ratioLabel === 'good'     ? 'rgba(100,220,120,0.25)' :
+                            comment.ratioLabel === 'moderate' ? 'rgba(255,200,60,0.25)'  :
+                                                                'rgba(255,90,90,0.25)'
+                          };
+                          color:${
+                            comment.ratioLabel === 'good'     ? 'rgb(120,240,140)' :
+                            comment.ratioLabel === 'moderate' ? 'rgb(255,215,80)'  :
+                                                                'rgb(255,110,110)'
+                          };
+                          border:1px solid ${
+                            comment.ratioLabel === 'good'     ? 'rgba(100,220,120,0.4)' :
+                            comment.ratioLabel === 'moderate' ? 'rgba(255,200,60,0.4)'  :
+                                                                'rgba(255,90,90,0.4)'
+                          };">
+                ${comment.ratioLabel.charAt(0).toUpperCase() + comment.ratioLabel.slice(1)}
+              </div>
+            ` : ''}
+
+            ${comment.twaAssessment ? `
+              <div style="font-size:0.7rem;color:rgba(255,255,255,0.85);
+                          margin-bottom:0.3rem;line-height:1.3;">
+                ${comment.twaAssessment}
+              </div>
+            ` : ''}
+
+            <div style="display:flex;flex-direction:column;gap:0.2rem;margin-top:0.15rem;">
+              ${comment.bwRatio ? `
+                <div style="display:flex;justify-content:space-between;
+                            font-size:0.65rem;color:rgba(255,255,255,0.6);">
+                  <span>Boat/Wind ratio</span>
+                  <span style="color:rgba(255,255,255,0.9);font-weight:500;">${comment.bwRatio}</span>
+                </div>
+              ` : ''}
+              ${comment.vmgMs ? `
+                <div style="display:flex;justify-content:space-between;
+                            font-size:0.65rem;color:rgba(255,255,255,0.6);">
+                  <span>VMG</span>
+                  <span style="color:rgba(255,255,255,0.9);font-weight:500;">${comment.vmgMs} m/s</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          ` : ''}
+
+        </div>
+      `;
+
+      const marker = window.L.marker(
+        [Number(point.lat), Number(point.lon)],
+        { icon: hoverIcon, interactive: true }
+      ).addTo(map);
+
+      marker.bindPopup(popupContent, {
+        closeButton: false,
+        offset: [0, -6],
+        autoPan: true,
+        autoPanPadding: [50, 50],
+        className: 'fixed-size-popup'
+      });
+
+      marker.on('click', function () { this.openPopup(); });
+
+      marker.on('mouseover', function (e) {
+        const dot = e.target.getElement()?.querySelector('.hover-dot');
+        if (dot) { dot.style.opacity = '1'; dot.style.transform = 'scale(1.2)'; }
+      });
+      marker.on('mouseout', function (e) {
+        const dot = e.target.getElement()?.querySelector('.hover-dot');
+        if (dot) { dot.style.opacity = '0'; dot.style.transform = 'scale(0.8)'; }
+      });
+
+      gpxLayers.push(marker);
+    });
+  });
+
+  // Fit map to selected tours
+  const bounds = calculateBounds();
+  if (bounds) map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+
+  addVMGLegend();
+  addInfoControl();
+}
+
+
+function showVMGPopup(p, marker) {
+
+  const html = `
+  <div style="font-family:Outfit;font-size:0.75rem">
+
+    <b>VMG:</b> ${Number(p.vmg).toFixed(2)} kts<br>
+    <b>VMG Ratio:</b> ${Number(p.vmg_ratio).toFixed(2)}<br>
+
+    <br>
+    <b>Boat Speed:</b> ${Number(p.boat_speed).toFixed(1)} kts<br>
+    <b>Wind Speed:</b> ${Number(p.wind_speed).toFixed(1)} kts<br>
+    <b>TWA:</b> ${Math.round(p.twa)}°<br>
+
+    <hr style="opacity:0.3">
+    <b>Analysis:</b><br>
+    ${p.vmg_comment}
+
+  </div>
+  `;
+
+  L.popup()
+    .setLatLng(marker.getLatLng())
+    .setContent(html)
+    .openOn(map);
+}
+
+function addVMGLegend() {
+  const legend = window.L.control({ position: 'bottomright' });
+
+  legend.onAdd = function () {
+    const div = window.L.DomUtil.create('div', 'vmg-legend');
+
+    const gradientHeight = 100;
+    const gradientWidth  = 15;
+    const numSteps       = 100;
+
+    let svg = `<svg width="${gradientWidth + 55}" height="${gradientHeight + 30}"
+                    viewBox="0 0 ${gradientWidth + 55} ${gradientHeight + 30}"
+                    xmlns="http://www.w3.org/2000/svg">`;
+
+    for (let i = 0; i < numSteps; i++) {
+      const y   = gradientHeight - (i / numSteps) * gradientHeight;
+      const val = vmgMin + (i / numSteps) * (vmgMax - vmgMin);
+      svg += `<rect x="0" y="${y + 10}" width="${gradientWidth}"
+                    height="${gradientHeight / numSteps + 0.5}"
+                    fill="${vmgRatioToColor(val)}" />`;
+    }
+
+    for (let i = 0; i <= 5; i++) {
+      const y   = gradientHeight - (i / 5) * gradientHeight;
+      const val = vmgMin + (i / 5) * (vmgMax - vmgMin);
+      svg += `
+        <line x1="${gradientWidth}" y1="${y + 10}"
+              x2="${gradientWidth + 5}" y2="${y + 10}"
+              stroke="white" stroke-width="1"/>
+        <text x="${gradientWidth + 8}" y="${y + 14}"
+              font-size="10" fill="white"
+              font-family="Outfit,sans-serif">${val.toFixed(2)}</text>
+      `;
+    }
+    svg += '</svg>';
+
+    div.innerHTML = `
+      <div class="legend-container">
+        <div class="legend-header">
+          <h4 class="legend-title">VMG Ratio</h4>
+          <button class="legend-toggle" data-legend="vmg-ratio">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 6L8 10L12 6" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="legend-content" data-legend-content="vmg-ratio">
+          ${svg}
+        </div>
+      </div>
+    `;
+
+    window.L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+
+  legend.addTo(map);
+  gpxLayers.push({ __legend: legend });
+
+  setTimeout(() => {
+    const btn     = document.querySelector('[data-legend="vmg-ratio"]');
+    const content = document.querySelector('[data-legend-content="vmg-ratio"]');
+    if (btn && content) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const collapsed = content.style.display === 'none';
+        content.style.display       = collapsed ? 'block' : 'none';
+        btn.style.transform         = collapsed ? 'rotate(0deg)' : 'rotate(-90deg)';
+      });
+    }
+  }, 100);
+}
+
+
+
+
+
+
 function addModeToggleControl() {
   if (!map) return;
   
@@ -109,8 +484,12 @@ function addModeToggleControl() {
         <button class="mode-toggle-btn ${mode === 'average' ? 'active' : ''}" data-mode="average">
           Average
         </button>
+        <button class="mode-toggle-btn ${mode === 'vmg' ? 'active' : ''}" data-mode="vmg">
+          VMG
+        </button>
       </div>
     `;
+
     
     window.L.DomEvent.disableClickPropagation(div);
     window.L.DomEvent.disableScrollPropagation(div);
@@ -316,7 +695,10 @@ function updateVisualization() {
     renderIndividualTours();
   } else if (mode === 'average') {
     renderAveragePerformance();
+  } else if (mode === 'vmg') {
+    renderVMGMode();
   }
+
   addModeToggleControl();
 }
 
@@ -1015,20 +1397,6 @@ gpxLayers.push(endMarker);
     });
   }
 
-  function speedToColor(speed, minSpeed, maxSpeed) {
-    if (maxSpeed === minSpeed) return '#4CAF50';
-
-    const t = Math.max(0, Math.min(1, (speed - minSpeed) / (maxSpeed - minSpeed)));
-
-    // Blue → Green → Yellow → Red gradient
-    if (t < 0.33) {
-      return `rgb(0, ${Math.round(255 * (t / 0.33))}, 255)`;
-    } else if (t < 0.66) {
-      return `rgb(${Math.round(255 * ((t - 0.33) / 0.33))}, 255, ${Math.round(255 * (1 - (t - 0.33) / 0.33))})`;
-    } else {
-      return `rgb(255, ${Math.round(255 * (1 - (t - 0.66) / 0.34))}, 0)`;
-    }
-  }
 
 function drawDirectionArrow(point, direction, lengthMeters, color, weight) {
   const angleRad = direction * Math.PI / 180;
