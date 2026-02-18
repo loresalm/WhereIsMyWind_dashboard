@@ -106,24 +106,12 @@ function parseVMGComment(raw) {
     result.ratioLabel = ratioMatch[2]; // "moderate", "poor", "good"
   }
 
-  // TWA + sailing assessment
-  const twaMatch = raw.match(/TWA ([\d.]+)°:\s*([^.]+)\./i);
-  if (twaMatch) {
-    result.twaValue = twaMatch[1];
-    result.twaAssessment = twaMatch[2].trim(); // "sailing too deep downwind"
-  }
-
-  // Boat/Wind speed ratio
-  const bwRatioMatch = raw.match(/Boat\/Wind speed ratio = ([\d.]+)/i);
-  if (bwRatioMatch) result.bwRatio = bwRatioMatch[1];
-
-  // VMG m/s, BoatSpeed, WindSpeed
-  const speedMatch = raw.match(/VMG = ([\d.]+) m\/s from BoatSpeed ([\d.]+) and WindSpeed ([\d.]+)/i);
-  if (speedMatch) {
-    result.vmgMs      = speedMatch[1];
-    result.boatSpeed2 = speedMatch[2];
-    result.windSpeed2 = speedMatch[3];
-  }
+  // Split into sentences: period followed by space and capital letter (or end of string)
+  // This avoids splitting on decimal points like "0.26" or "160.9°"
+  result.sentences = raw
+    .split(/\.\s+(?=[A-Z])|\.$/g)  // Split on ". " followed by capital OR period at end
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
 
   return result;
 }
@@ -148,11 +136,63 @@ function computeVMGRange(tours) {
   vmgMax = Math.max(...values);
 }
 
+function getVMGRatioColor(value) {
+  if (!value) return { bg: 'rgba(150,150,150,0.25)', text: 'rgb(180,180,180)', border: 'rgba(150,150,150,0.4)' };
+  
+  const val = parseFloat(value);
+  
+  // Thresholds based on your examples: <0.25 poor, 0.25-0.4 moderate, >0.4 good
+  if (val >= 0.4) {
+    return { 
+      bg: 'rgba(100,220,120,0.25)', 
+      text: 'rgb(120,240,140)', 
+      border: 'rgba(100,220,120,0.4)' 
+    };
+  } else if (val >= 0.25) {
+    return { 
+      bg: 'rgba(255,200,60,0.25)', 
+      text: 'rgb(255,215,80)', 
+      border: 'rgba(255,200,60,0.4)' 
+    };
+  } else {
+    return { 
+      bg: 'rgba(255,90,90,0.25)', 
+      text: 'rgb(255,110,110)', 
+      border: 'rgba(255,90,90,0.4)' 
+    };
+  }
+}
+
 
 function vmgRatioToColor(value) {
-  if (vmgMax === vmgMin) return 'rgb(0, 120, 255)';
+  if (vmgMax === vmgMin) return 'rgb(100, 220, 100)'; // Default green
+  
+  // Normalize VMG ratio to 0-1 (low VMG = 0, high VMG = 1)
   const t = Math.max(0, Math.min(1, (value - vmgMin) / (vmgMax - vmgMin)));
-  return speedToColor(vmgMin + t * (vmgMax - vmgMin), vmgMin, vmgMax);
+  
+  // Red (t=0) → Orange → Yellow → Green (t=1)
+  if (t < 0.33) {
+    // Red → Orange
+    const localT = t / 0.33;
+    const r = 255;
+    const g = Math.round(100 + localT * 65); // 100 → 165
+    const b = 0;
+    return `rgb(${r}, ${g}, ${b})`;
+  } else if (t < 0.66) {
+    // Orange → Yellow
+    const localT = (t - 0.33) / 0.33;
+    const r = 255;
+    const g = Math.round(165 + localT * 90); // 165 → 255
+    const b = 0;
+    return `rgb(${r}, ${g}, ${b})`;
+  } else {
+    // Yellow → Green
+    const localT = (t - 0.66) / 0.34;
+    const r = Math.round(255 * (1 - localT)); // 255 → 0
+    const g = 255;
+    const b = 0;
+    return `rgb(${r}, ${g}, ${b})`;
+  }
 }
 
 
@@ -214,7 +254,7 @@ function renderVMGMode() {
         iconAnchor: [3, 3]
       });
 
-      const twa       = point.twa        != null ? Math.round(point.twa) + '°'           : 'N/A';
+      const twa       = point.wind_boat_angle != null ? Math.round(point.wind_boat_angle) + '°' : 'N/A';
       const vmg       = point.vmg        != null ? Number(point.vmg).toFixed(2) + ' kts' : 'N/A';
       const vmgRatio  = point.vmg_ratio  != null ? Number(point.vmg_ratio).toFixed(3)    : 'N/A';
       const boatSpeed = point.boat_speed != null ? Number(point.boat_speed).toFixed(1) + ' kts' : 'N/A';
@@ -269,52 +309,26 @@ function renderVMGMode() {
             <div style="font-size:0.55rem;color:rgba(255,255,255,0.5);
                         text-transform:uppercase;margin-bottom:0.25rem;">Analysis</div>
 
-            ${comment.ratioLabel ? `
-              <div style="display:inline-block;margin-bottom:0.4rem;
-                          padding:0.15rem 0.45rem;border-radius:20px;font-size:0.65rem;
-                          font-weight:600;letter-spacing:0.03em;
-                          background:${
-                            comment.ratioLabel === 'good'     ? 'rgba(100,220,120,0.25)' :
-                            comment.ratioLabel === 'moderate' ? 'rgba(255,200,60,0.25)'  :
-                                                                'rgba(255,90,90,0.25)'
-                          };
-                          color:${
-                            comment.ratioLabel === 'good'     ? 'rgb(120,240,140)' :
-                            comment.ratioLabel === 'moderate' ? 'rgb(255,215,80)'  :
-                                                                'rgb(255,110,110)'
-                          };
-                          border:1px solid ${
-                            comment.ratioLabel === 'good'     ? 'rgba(100,220,120,0.4)' :
-                            comment.ratioLabel === 'moderate' ? 'rgba(255,200,60,0.4)'  :
-                                                                'rgba(255,90,90,0.4)'
-                          };">
-                ${comment.ratioLabel.charAt(0).toUpperCase() + comment.ratioLabel.slice(1)}
+            ${comment.ratioValue && comment.ratioLabel ? (() => {
+              const colors = getVMGRatioColor(comment.ratioValue);
+              return `
+                <div style="display:inline-block;margin-bottom:0.4rem;
+                            padding:0.15rem 0.45rem;border-radius:20px;font-size:0.65rem;
+                            font-weight:600;letter-spacing:0.03em;
+                            background:${colors.bg};
+                            color:${colors.text};
+                            border:1px solid ${colors.border};">
+                  ${comment.ratioLabel.charAt(0).toUpperCase() + comment.ratioLabel.slice(1)}
+                </div>
+              `;
+            })() : ''}
+
+            ${comment.sentences ? `
+              <div style="font-size:0.68rem;color:rgba(255,255,255,0.85);
+                          line-height:1.5;">
+                ${comment.sentences.map(s => `<div style="margin-bottom:0.25rem;">${s}.</div>`).join('')}
               </div>
             ` : ''}
-
-            ${comment.twaAssessment ? `
-              <div style="font-size:0.7rem;color:rgba(255,255,255,0.85);
-                          margin-bottom:0.3rem;line-height:1.3;">
-                ${comment.twaAssessment}
-              </div>
-            ` : ''}
-
-            <div style="display:flex;flex-direction:column;gap:0.2rem;margin-top:0.15rem;">
-              ${comment.bwRatio ? `
-                <div style="display:flex;justify-content:space-between;
-                            font-size:0.65rem;color:rgba(255,255,255,0.6);">
-                  <span>Boat/Wind ratio</span>
-                  <span style="color:rgba(255,255,255,0.9);font-weight:500;">${comment.bwRatio}</span>
-                </div>
-              ` : ''}
-              ${comment.vmgMs ? `
-                <div style="display:flex;justify-content:space-between;
-                            font-size:0.65rem;color:rgba(255,255,255,0.6);">
-                  <span>VMG</span>
-                  <span style="color:rgba(255,255,255,0.9);font-weight:500;">${comment.vmgMs} m/s</span>
-                </div>
-              ` : ''}
-            </div>
           </div>
           ` : ''}
 
